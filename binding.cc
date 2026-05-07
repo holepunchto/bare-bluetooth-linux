@@ -1,5 +1,5 @@
-#include <js.h>
 #include <bare.h>
+#include <js.h>
 #include <jstl.h>
 
 #include <dbus/dbus.h>
@@ -9,23 +9,21 @@
 #include <cstring>
 #include <string>
 
-#define BLUEZ_BUS        "org.bluez"
-#define DBUS_PROP_IFACE  "org.freedesktop.DBus.Properties"
+#define BLUEZ_BUS "org.bluez"
+#define DBUS_PROP_IFACE "org.freedesktop.DBus.Properties"
 #define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
 
-// --- D-Bus property helpers ---
-
-static char *
-dbus_get_string_prop (DBusConnection *conn, const char *path, const char *iface, const char *prop) {
-  DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
-  dbus_message_append_args(msg,
-    DBUS_TYPE_STRING, &iface,
-    DBUS_TYPE_STRING, &prop,
-    DBUS_TYPE_INVALID);
+static char *dbus_get_string_prop(DBusConnection *conn, const char *path,
+                                  const char *iface, const char *prop) {
+  DBusMessage *msg =
+      dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING,
+                           &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
   dbus_error_init(&err);
-  DBusMessage *reply = dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+  DBusMessage *reply =
+      dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
   dbus_message_unref(msg);
 
   char *result = nullptr;
@@ -40,22 +38,23 @@ dbus_get_string_prop (DBusConnection *conn, const char *path, const char *iface,
     }
     dbus_message_unref(reply);
   }
-  if (dbus_error_is_set(&err)) dbus_error_free(&err);
+  if (dbus_error_is_set(&err))
+    dbus_error_free(&err);
 
   return result;
 }
 
-static bool
-dbus_get_bool_prop (DBusConnection *conn, const char *path, const char *iface, const char *prop) {
-  DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
-  dbus_message_append_args(msg,
-    DBUS_TYPE_STRING, &iface,
-    DBUS_TYPE_STRING, &prop,
-    DBUS_TYPE_INVALID);
+static bool dbus_get_bool_prop(DBusConnection *conn, const char *path,
+                               const char *iface, const char *prop) {
+  DBusMessage *msg =
+      dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING,
+                           &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
   dbus_error_init(&err);
-  DBusMessage *reply = dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+  DBusMessage *reply =
+      dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
   dbus_message_unref(msg);
 
   bool result = false;
@@ -70,14 +69,17 @@ dbus_get_bool_prop (DBusConnection *conn, const char *path, const char *iface, c
     }
     dbus_message_unref(reply);
   }
-  if (dbus_error_is_set(&err)) dbus_error_free(&err);
+  if (dbus_error_is_set(&err))
+    dbus_error_free(&err);
 
   return result;
 }
 
-static void
-dbus_set_bool_prop (DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
-  DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Set");
+static void dbus_set_bool_prop(DBusConnection *conn, const char *path,
+                               const char *iface, const char *prop,
+                               bool value) {
+  DBusMessage *msg =
+      dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Set");
 
   DBusMessageIter iter, variant;
   dbus_message_iter_init_append(msg, &iter);
@@ -91,14 +93,15 @@ dbus_set_bool_prop (DBusConnection *conn, const char *path, const char *iface, c
 
   DBusError err;
   dbus_error_init(&err);
-  DBusMessage *reply = dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+  DBusMessage *reply =
+      dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
   dbus_message_unref(msg);
 
-  if (reply) dbus_message_unref(reply);
-  if (dbus_error_is_set(&err)) dbus_error_free(&err);
+  if (reply)
+    dbus_message_unref(reply);
+  if (dbus_error_is_set(&err))
+    dbus_error_free(&err);
 }
-
-// --- Adapter handle ---
 
 struct bare_bluetooth_linux_adapter_t {
   js_env_t *env;
@@ -106,14 +109,9 @@ struct bare_bluetooth_linux_adapter_t {
   char *adapter_path;
 };
 
-// --- Adapter functions ---
-
 static js_external_t<bare_bluetooth_linux_adapter_t>
-bare_bluetooth_linux_adapter_init (
-  js_env_t *env,
-  js_receiver_t,
-  std::string path
-) {
+bare_bluetooth_linux_adapter_init(js_env_t *env, js_receiver_t,
+                                  std::string path) {
   auto *adapter = new bare_bluetooth_linux_adapter_t;
   adapter->env = env;
   adapter->adapter_path = strdup(path.c_str());
@@ -130,12 +128,9 @@ bare_bluetooth_linux_adapter_init (
   return handle;
 }
 
-static void
-bare_bluetooth_linux_adapter_destroy (
-  js_env_t *env,
-  js_receiver_t,
-  js_external_t<bare_bluetooth_linux_adapter_t> handle
-) {
+static void bare_bluetooth_linux_adapter_destroy(
+    js_env_t *env, js_receiver_t,
+    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
   bare_bluetooth_linux_adapter_t *adapter;
   int err = js_get_value(env, handle, adapter);
   assert(err == 0);
@@ -149,71 +144,60 @@ bare_bluetooth_linux_adapter_destroy (
   delete adapter;
 }
 
-static bool
-bare_bluetooth_linux_adapter_get_powered (
-  js_env_t *env,
-  js_receiver_t,
-  js_external_t<bare_bluetooth_linux_adapter_t> handle
-) {
+static bool bare_bluetooth_linux_adapter_get_powered(
+    js_env_t *env, js_receiver_t,
+    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
   bare_bluetooth_linux_adapter_t *adapter;
   int err = js_get_value(env, handle, adapter);
   assert(err == 0);
 
-  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Powered");
+  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path,
+                            BLUEZ_ADAPTER_IFACE, "Powered");
 }
 
-static void
-bare_bluetooth_linux_adapter_set_powered (
-  js_env_t *env,
-  js_receiver_t,
-  js_external_t<bare_bluetooth_linux_adapter_t> handle,
-  bool value
-) {
+static void bare_bluetooth_linux_adapter_set_powered(
+    js_env_t *env, js_receiver_t,
+    js_external_t<bare_bluetooth_linux_adapter_t> handle, bool value) {
   bare_bluetooth_linux_adapter_t *adapter;
   int err = js_get_value(env, handle, adapter);
   assert(err == 0);
 
-  dbus_set_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Powered", value);
+  dbus_set_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE,
+                     "Powered", value);
 }
 
-static bool
-bare_bluetooth_linux_adapter_get_discovering (
-  js_env_t *env,
-  js_receiver_t,
-  js_external_t<bare_bluetooth_linux_adapter_t> handle
-) {
+static bool bare_bluetooth_linux_adapter_get_discovering(
+    js_env_t *env, js_receiver_t,
+    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
   bare_bluetooth_linux_adapter_t *adapter;
   int err = js_get_value(env, handle, adapter);
   assert(err == 0);
 
-  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Discovering");
+  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path,
+                            BLUEZ_ADAPTER_IFACE, "Discovering");
 }
 
-static std::string
-bare_bluetooth_linux_adapter_get_address (
-  js_env_t *env,
-  js_receiver_t,
-  js_external_t<bare_bluetooth_linux_adapter_t> handle
-) {
+static std::string bare_bluetooth_linux_adapter_get_address(
+    js_env_t *env, js_receiver_t,
+    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
   bare_bluetooth_linux_adapter_t *adapter;
   int err = js_get_value(env, handle, adapter);
   assert(err == 0);
 
-  char *addr = dbus_get_string_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Address");
+  char *addr = dbus_get_string_prop(adapter->conn, adapter->adapter_path,
+                                    BLUEZ_ADAPTER_IFACE, "Address");
   std::string result(addr ? addr : "");
   free(addr);
 
   return result;
 }
 
-// --- Export table ---
-
-static js_value_t *
-bare_bluetooth_linux_exports (js_env_t *env, js_value_t *exports) {
+static js_value_t *bare_bluetooth_linux_exports(js_env_t *env,
+                                                js_value_t *exports) {
   int err;
 
-#define V(name, fn) \
-  err = js_set_property<fn>(env, exports, name); \
+#define V(name, fn)                                                            \
+  err = js_set_property<fn>(env, exports, name);                               \
   assert(err == 0);
 
   V("adapterInit", bare_bluetooth_linux_adapter_init)
