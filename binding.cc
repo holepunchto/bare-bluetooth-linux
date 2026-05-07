@@ -104,89 +104,70 @@ static void dbus_set_bool_prop(DBusConnection *conn, const char *path,
 }
 
 struct bare_bluetooth_linux_adapter_t {
-  js_env_t *env;
   DBusConnection *conn;
   char *adapter_path;
 };
 
-static js_external_t<bare_bluetooth_linux_adapter_t>
-bare_bluetooth_linux_adapter_init(js_env_t *env, js_receiver_t,
-                                  std::string path) {
-  auto *adapter = new bare_bluetooth_linux_adapter_t;
-  adapter->env = env;
+static js_arraybuffer_t bare_bluetooth_linux_adapter_init(js_env_t *env,
+                                                          js_receiver_t,
+                                                          std::string path) {
+  js_arraybuffer_t handle;
+  bare_bluetooth_linux_adapter_t *adapter;
+  int err = js_create_arraybuffer(env, adapter, handle);
+  assert(err == 0);
+
   adapter->adapter_path = strdup(path.c_str());
 
-  DBusError err;
-  dbus_error_init(&err);
-  adapter->conn = dbus_bus_get(DBUS_BUS_SYSTEM, &err);
-  assert(!dbus_error_is_set(&err));
-
-  js_external_t<bare_bluetooth_linux_adapter_t> handle;
-  int e = js_create_external(env, adapter, handle);
-  assert(e == 0);
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  adapter->conn = dbus_bus_get(DBUS_BUS_SYSTEM, &dbus_err);
+  assert(!dbus_error_is_set(&dbus_err));
 
   return handle;
 }
 
 static void bare_bluetooth_linux_adapter_destroy(
     js_env_t *env, js_receiver_t,
-    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
-  bare_bluetooth_linux_adapter_t *adapter;
-  int err = js_get_value(env, handle, adapter);
-  assert(err == 0);
-
+    js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter) {
   if (adapter->conn) {
     dbus_connection_unref(adapter->conn);
     adapter->conn = nullptr;
   }
 
   free(adapter->adapter_path);
-  delete adapter;
 }
 
 static bool bare_bluetooth_linux_adapter_get_powered(
     js_env_t *env, js_receiver_t,
-    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
-  bare_bluetooth_linux_adapter_t *adapter;
-  int err = js_get_value(env, handle, adapter);
-  assert(err == 0);
-
+    js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter) {
   return dbus_get_bool_prop(adapter->conn, adapter->adapter_path,
                             BLUEZ_ADAPTER_IFACE, "Powered");
 }
 
 static void bare_bluetooth_linux_adapter_set_powered(
     js_env_t *env, js_receiver_t,
-    js_external_t<bare_bluetooth_linux_adapter_t> handle, bool value) {
-  bare_bluetooth_linux_adapter_t *adapter;
-  int err = js_get_value(env, handle, adapter);
-  assert(err == 0);
-
+    js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+    bool value) {
   dbus_set_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE,
                      "Powered", value);
 }
 
 static bool bare_bluetooth_linux_adapter_get_discovering(
     js_env_t *env, js_receiver_t,
-    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
-  bare_bluetooth_linux_adapter_t *adapter;
-  int err = js_get_value(env, handle, adapter);
-  assert(err == 0);
-
+    js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter) {
   return dbus_get_bool_prop(adapter->conn, adapter->adapter_path,
                             BLUEZ_ADAPTER_IFACE, "Discovering");
 }
 
-static std::string bare_bluetooth_linux_adapter_get_address(
+static std::optional<std::string> bare_bluetooth_linux_adapter_get_address(
     js_env_t *env, js_receiver_t,
-    js_external_t<bare_bluetooth_linux_adapter_t> handle) {
-  bare_bluetooth_linux_adapter_t *adapter;
-  int err = js_get_value(env, handle, adapter);
-  assert(err == 0);
-
+    js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter) {
   char *addr = dbus_get_string_prop(adapter->conn, adapter->adapter_path,
                                     BLUEZ_ADAPTER_IFACE, "Address");
-  std::string result(addr ? addr : "");
+  if (!addr)
+    return std::nullopt;
+
+  std::string result(addr);
   free(addr);
 
   return result;
