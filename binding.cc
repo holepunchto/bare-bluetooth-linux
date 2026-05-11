@@ -4,7 +4,7 @@
 
 #include <dbus/dbus.h>
 
-#include <cassert>
+#include <assert.h>
 #include <optional>
 #include <string>
 
