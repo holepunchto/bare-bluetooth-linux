@@ -1,10 +1,8 @@
+#include <assert.h>
 #include <bare.h>
+#include <dbus/dbus.h>
 #include <js.h>
 #include <jstl.h>
-
-#include <dbus/dbus.h>
-
-#include <assert.h>
 #include <optional>
 #include <string>
 
