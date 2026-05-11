@@ -36,6 +36,7 @@
   "homepage": "https://github.com/holepunchto/bare-bluetooth-linux#readme",
   "dependencies": {},
   "devDependencies": {
+    "bare-os": "^3.9.1"
     "brittle": "^3.18.0",
     "cmake-bare": "^1.6.5",
     "cmake-fetch": "^1.4.9",
