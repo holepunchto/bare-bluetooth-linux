@@ -5,15 +5,14 @@
 #include <dbus/dbus.h>
 
 #include <cassert>
-#include <cstdlib>
-#include <cstring>
+#include <optional>
 #include <string>
 
 #define BLUEZ_BUS           "org.bluez"
 #define DBUS_PROP_IFACE     "org.freedesktop.DBus.Properties"
 #define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
 
-static char *
+static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
@@ -25,7 +24,7 @@ dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, 
     dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
   dbus_message_unref(msg);
 
-  char *result = nullptr;
+  std::optional<std::string> result;
   if (reply && !dbus_error_is_set(&err)) {
     DBusMessageIter iter, variant;
     dbus_message_iter_init(reply, &iter);
@@ -33,7 +32,7 @@ dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, 
     if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
       const char *val;
       dbus_message_iter_get_basic(&variant, &val);
-      result = strdup(val);
+      result = val;
     }
     dbus_message_unref(reply);
   }
@@ -102,7 +101,7 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
-  char *adapter_path;
+  std::string adapter_path;
 };
 
 static js_arraybuffer_t
@@ -112,7 +111,7 @@ bare_bluetooth_linux_adapter_init(js_env_t *env, js_receiver_t, std::string path
   int err = js_create_arraybuffer(env, adapter, handle);
   assert(err == 0);
 
-  adapter->adapter_path = strdup(path.c_str());
+  adapter->adapter_path = path;
 
   DBusError dbus_err;
   dbus_error_init(&dbus_err);
@@ -130,43 +129,34 @@ bare_bluetooth_linux_adapter_destroy(
     dbus_connection_unref(adapter->conn);
     adapter->conn = nullptr;
   }
-
-  free(adapter->adapter_path);
 }
 
 static bool
 bare_bluetooth_linux_adapter_get_powered(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Powered");
+  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered");
 }
 
 static void
 bare_bluetooth_linux_adapter_set_powered(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, bool value
 ) {
-  dbus_set_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Powered", value);
+  dbus_set_bool_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered", value);
 }
 
 static bool
 bare_bluetooth_linux_adapter_get_discovering(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Discovering");
+  return dbus_get_bool_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Discovering");
 }
 
 static std::optional<std::string>
 bare_bluetooth_linux_adapter_get_address(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  char *addr = dbus_get_string_prop(adapter->conn, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "Address");
-  if (!addr)
-    return std::nullopt;
-
-  std::string result(addr);
-  free(addr);
-
-  return result;
+  return dbus_get_string_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Address");
 }
 
 static js_value_t *
