@@ -1,1 +1,1 @@
-require("./test/adapter");
+require('./test/adapter')

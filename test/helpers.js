@@ -1,3 +1,3 @@
-const os = require("bare-os");
+const os = require('bare-os')
 
-exports.isCI = !!os.getEnv("CI");
+exports.isCI = !!os.getEnv('CI')

@@ -1,1 +1,1 @@
-exports.Adapter = require("./lib/adapter");
+exports.Adapter = require('./lib/adapter')
