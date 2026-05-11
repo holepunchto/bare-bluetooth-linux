@@ -1,0 +1,39 @@
+name: Publish
+on:
+  push:
+    tags:
+      - v*
+permissions:
+  id-token: write
+  contents: write
+jobs:
+  prebuild:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - os: ubuntu-22.04-arm
+            platform: linux
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    name: Build / ${{ matrix.platform }}-${{ matrix.arch }}
+    steps:
+      - uses: holepunchto/actions/bare-base@v1
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
+      - uses: holepunchto/actions/compile-prebuilds@v1
+        with:
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          upload: true
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+    needs: prebuild
+    name: Publish
+    steps:
+      - uses: holepunchto/actions/node-base@v1
+      - uses: holepunchto/actions/download-prebuilds@v1
+      - uses: holepunchto/actions/publish@v1
