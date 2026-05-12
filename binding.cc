@@ -14,6 +14,7 @@
 #define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
 #define BLUEZ_DEVICE_IFACE  "org.bluez.Device1"
 #define DBUS_TIMEOUT        2000
+#define DBUS_POLL_INTERVAL  200
 
 static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
@@ -359,7 +360,7 @@ bare_bluetooth_linux__dbus_thread(void *data) {
   auto *adapter = static_cast<bare_bluetooth_linux_adapter_t *>(data);
 
   while (adapter->running.load()) {
-    dbus_connection_read_write_dispatch(adapter->signal_conn, 200);
+    if (!dbus_connection_read_write_dispatch(adapter->signal_conn, DBUS_POLL_INTERVAL)) break;
   }
 }
 
