@@ -51,4 +51,24 @@ test('inspect shape', (t) => {
   const obj = adapter[Symbol.for('bare.inspect')]()
   t.ok('path' in obj)
   t.ok('powered' in obj)
+  t.ok('discovering' in obj)
+})
+
+test('devices map starts empty', (t) => {
+  using adapter = new Adapter()
+  t.is(adapter.devices.size, 0)
+})
+
+test('is an EventEmitter', (t) => {
+  using adapter = new Adapter()
+  t.is(typeof adapter.on, 'function')
+  t.is(typeof adapter.emit, 'function')
+})
+
+test('startDiscovery and stopDiscovery', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  t.execution(() => {
+    adapter.startDiscovery()
+    adapter.stopDiscovery()
+  })
 })

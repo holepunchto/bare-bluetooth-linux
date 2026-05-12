@@ -34,7 +34,9 @@
     "url": "https://github.com/holepunchto/bare-bluetooth-linux/issues"
   },
   "homepage": "https://github.com/holepunchto/bare-bluetooth-linux#readme",
-  "dependencies": {},
+  "dependencies": {
+    "bare-events": "^2.5.4"
+  },
   "devDependencies": {
     "bare-os": "^3.9.1",
     "brittle": "^3.18.0",
