@@ -390,11 +390,13 @@ bare_bluetooth_linux_adapter_init(
 
   DBusError dbus_err;
 
+  // TODO: handle D-Bus errors and throw to JS
   dbus_error_init(&dbus_err);
   adapter->conn = dbus_bus_get_private(DBUS_BUS_SYSTEM, &dbus_err);
   assert(!dbus_error_is_set(&dbus_err));
   dbus_connection_set_exit_on_disconnect(adapter->conn, FALSE);
 
+  // TODO: handle D-Bus errors and throw to JS
   dbus_error_init(&dbus_err);
   adapter->signal_conn = dbus_bus_get_private(DBUS_BUS_SYSTEM, &dbus_err);
   assert(!dbus_error_is_set(&dbus_err));
