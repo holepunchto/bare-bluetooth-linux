@@ -1,11 +1,9 @@
 #include <assert.h>
 #include <atomic>
 #include <bare.h>
-#include <cstring>
 #include <dbus/dbus.h>
 #include <js.h>
 #include <jstl.h>
-#include <new>
 #include <optional>
 #include <string>
 #include <uv.h>
@@ -15,8 +13,7 @@
 #define DBUS_OM_IFACE       "org.freedesktop.DBus.ObjectManager"
 #define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
 #define BLUEZ_DEVICE_IFACE  "org.bluez.Device1"
-
-// D-Bus property helpers
+#define DBUS_TIMEOUT        2000
 
 static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
@@ -27,7 +24,7 @@ dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, 
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
   std::optional<std::string> result;
@@ -57,7 +54,7 @@ dbus_get_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
   bool result = false;
@@ -87,7 +84,7 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
   int32_t result = 0;
@@ -126,7 +123,7 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
   if (reply)
@@ -143,7 +140,7 @@ dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface,
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, 2000, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
   if (reply)
@@ -153,12 +150,6 @@ dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface,
 }
 
 struct bare_bluetooth_linux_adapter_t;
-
-static DBusHandlerResult
-bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void *data);
-
-static void
-bare_bluetooth_linux__dbus_thread(void *data);
 
 struct bare_bluetooth_linux_device_added_event_t {
   std::string path;
@@ -552,8 +543,6 @@ bare_bluetooth_linux_device_get_connected(
 ) {
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connected");
 }
-
-// Export table
 
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
