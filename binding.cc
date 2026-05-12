@@ -441,6 +441,8 @@ bare_bluetooth_linux_adapter_destroy(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
+  if (!adapter->conn || !adapter->signal_conn) return;
+
   adapter->running.store(false);
   uv_thread_join(&adapter->thread);
 
@@ -455,15 +457,13 @@ bare_bluetooth_linux_adapter_destroy(
   err = js_delete_reference(env, adapter->ctx);
   assert(err == 0);
 
-  if (adapter->signal_conn) {
-    dbus_connection_close(adapter->signal_conn);
-    dbus_connection_unref(adapter->signal_conn);
-  }
+  dbus_connection_close(adapter->signal_conn);
+  dbus_connection_unref(adapter->signal_conn);
+  adapter->signal_conn = nullptr;
 
-  if (adapter->conn) {
-    dbus_connection_close(adapter->conn);
-    dbus_connection_unref(adapter->conn);
-  }
+  dbus_connection_close(adapter->conn);
+  dbus_connection_unref(adapter->conn);
+  adapter->conn = nullptr;
 
   adapter->~bare_bluetooth_linux_adapter_t();
 }
