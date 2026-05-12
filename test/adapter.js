@@ -65,10 +65,14 @@ test('is an EventEmitter', (t) => {
   t.is(typeof adapter.emit, 'function')
 })
 
-test('startDiscovery and stopDiscovery', { skip: isCI }, (t) => {
+test('startDiscovery', { skip: isCI }, (t) => {
   using adapter = new Adapter()
-  t.execution(() => {
-    adapter.startDiscovery()
-    adapter.stopDiscovery()
-  })
+  t.execution(() => adapter.startDiscovery())
+})
+
+test('stopDiscovery', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  adapter.startDiscovery()
+
+  t.execution(() => adapter.stopDiscovery())
 })
