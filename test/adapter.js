@@ -46,6 +46,14 @@ test('destroy is idempotent', (t) => {
   })
 })
 
+test('inspect shape', (t) => {
+  using adapter = new Adapter()
+  const obj = adapter[Symbol.for('bare.inspect')]()
+  t.ok('path' in obj)
+  t.ok('powered' in obj)
+  t.ok('discovering' in obj)
+})
+
 test('devices map starts empty', (t) => {
   using adapter = new Adapter()
   t.is(adapter.devices.size, 0)
