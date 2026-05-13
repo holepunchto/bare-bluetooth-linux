@@ -176,6 +176,7 @@ struct bare_bluetooth_linux_adapter_t {
   DBusConnection *signal_conn;
   std::string adapter_path;
   std::atomic<bool> running;
+  std::atomic<int> tsfn_count;
   uv_thread_t thread;
   js_ref_t *ctx;
   js_threadsafe_function_t *tsfn_device_added;
@@ -234,7 +235,24 @@ bare_bluetooth_linux__on_device_removed(
 
 static void
 bare_bluetooth_linux__on_tsfn_finalize(js_env_t *env, bare_bluetooth_linux_tsfn_ctx_t *ctx) {
+  auto *adapter = ctx->adapter;
   delete ctx;
+
+  if (adapter->tsfn_count.fetch_sub(1) > 1) return;
+
+  int err = js_delete_reference(env, adapter->ctx);
+  assert(err == 0);
+
+  dbus_connection_close(adapter->signal_conn);
+  dbus_connection_unref(adapter->signal_conn);
+
+  dbus_connection_close(adapter->conn);
+  dbus_connection_unref(adapter->conn);
+
+  adapter->conn = nullptr;
+  adapter->signal_conn = nullptr;
+
+  adapter->~bare_bluetooth_linux_adapter_t();
 }
 
 static void
@@ -384,6 +402,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
+  adapter->tsfn_count.store(2);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
@@ -443,7 +462,7 @@ bare_bluetooth_linux_adapter_destroy(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  if (!adapter->conn || !adapter->signal_conn) return;
+  if (!adapter->running.load()) return;
 
   adapter->running.store(false);
   uv_thread_join(&adapter->thread);
@@ -455,19 +474,6 @@ bare_bluetooth_linux_adapter_destroy(
 
   err = js_release_threadsafe_function(adapter->tsfn_device_removed, js_threadsafe_function_release);
   assert(err == 0);
-
-  err = js_delete_reference(env, adapter->ctx);
-  assert(err == 0);
-
-  dbus_connection_close(adapter->signal_conn);
-  dbus_connection_unref(adapter->signal_conn);
-  adapter->signal_conn = nullptr;
-
-  dbus_connection_close(adapter->conn);
-  dbus_connection_unref(adapter->conn);
-  adapter->conn = nullptr;
-
-  adapter->~bare_bluetooth_linux_adapter_t();
 }
 
 static bool
