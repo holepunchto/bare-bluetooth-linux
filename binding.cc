@@ -133,7 +133,7 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
     dbus_error_free(&err);
 }
 
-static void
+static std::optional<std::string>
 dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, iface, method);
@@ -144,10 +144,16 @@ dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface,
     dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
+  if (dbus_error_is_set(&err)) {
+    auto error = err.message;
+    dbus_error_free(&err);
+    return error;
+  }
+
   if (reply)
     dbus_message_unref(reply);
-  if (dbus_error_is_set(&err))
-    dbus_error_free(&err);
+
+  return std::nullopt;
 }
 
 struct bare_bluetooth_linux_adapter_t;
@@ -508,14 +514,22 @@ static void
 bare_bluetooth_linux_adapter_start_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
+  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
 }
 
 static void
 bare_bluetooth_linux_adapter_stop_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
+  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
 }
 
 static std::optional<std::string>
