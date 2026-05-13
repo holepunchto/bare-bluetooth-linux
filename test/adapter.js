@@ -51,4 +51,43 @@ test('inspect shape', (t) => {
   const obj = adapter[Symbol.for('bare.inspect')]()
   t.ok('path' in obj)
   t.ok('powered' in obj)
+  t.ok('discovering' in obj)
+})
+
+test('devices map starts empty', (t) => {
+  using adapter = new Adapter()
+  t.is(adapter.devices.size, 0)
+})
+
+test('is an EventEmitter', (t) => {
+  using adapter = new Adapter()
+  t.is(typeof adapter.on, 'function')
+  t.is(typeof adapter.emit, 'function')
+})
+
+test('startDiscovery', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  t.execution(() => adapter.startDiscovery())
+})
+
+test('stopDiscovery', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  adapter.startDiscovery()
+
+  t.execution(() => adapter.stopDiscovery())
+})
+
+test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const device = await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  t.ok(device)
+  t.ok(adapter.devices.has(device.path))
 })
