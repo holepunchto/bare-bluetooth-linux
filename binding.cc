@@ -76,7 +76,7 @@ dbus_get_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
   return result;
 }
 
-static int32_t
+static std::optional<int32_t>
 dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
@@ -88,7 +88,7 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
     dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
-  int32_t result = 0;
+  std::optional<int32_t> result;
   if (reply && !dbus_error_is_set(&err)) {
     DBusMessageIter iter, variant;
     dbus_message_iter_init(reply, &iter);
@@ -546,7 +546,7 @@ bare_bluetooth_linux_device_get_name(
   return dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Name");
 }
 
-static int32_t
+static std::optional<int32_t>
 bare_bluetooth_linux_device_get_rssi(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
