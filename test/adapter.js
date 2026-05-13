@@ -91,7 +91,7 @@ test('discovery emits device with expected shape', { skip: isCI, timeout: 10000 
   t.ok(typeof device.address === 'string')
   t.ok(device.address.length > 0)
   t.ok(typeof device.path === 'string')
-  t.ok(device.name === null || typeof device.name === 'string')
+  t.ok(device.name === undefined || typeof device.name === 'string')
   t.ok(typeof device.rssi === 'number')
   t.ok(typeof device.paired === 'boolean')
   t.ok(typeof device.connected === 'boolean')
