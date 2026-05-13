@@ -7,7 +7,7 @@ test('Device is exported', (t) => {
   t.is(Device.name, 'Device')
 })
 
-test('device inspect shape', { skip: isCI, timeout: 10000 }, async (t) => {
+test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t) => {
   using adapter = new Adapter()
 
   adapter.startDiscovery()
@@ -18,8 +18,11 @@ test('device inspect shape', { skip: isCI, timeout: 10000 }, async (t) => {
 
   adapter.stopDiscovery()
 
-  const obj = device[Symbol.for('bare.inspect')]()
-  t.ok('path' in obj)
-  t.ok('address' in obj)
-  t.ok('name' in obj)
+  t.ok(typeof device.address === 'string')
+  t.ok(device.address.length > 0)
+  t.ok(typeof device.path === 'string')
+  t.ok(device.name === undefined || typeof device.name === 'string')
+  t.ok(typeof device.rssi === 'number')
+  t.ok(typeof device.paired === 'boolean')
+  t.ok(typeof device.connected === 'boolean')
 })

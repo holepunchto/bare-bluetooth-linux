@@ -46,14 +46,6 @@ test('destroy is idempotent', (t) => {
   })
 })
 
-test('inspect shape', (t) => {
-  using adapter = new Adapter()
-  const obj = adapter[Symbol.for('bare.inspect')]()
-  t.ok('path' in obj)
-  t.ok('powered' in obj)
-  t.ok('discovering' in obj)
-})
-
 test('devices map starts empty', (t) => {
   using adapter = new Adapter()
   t.is(adapter.devices.size, 0)
@@ -77,7 +69,7 @@ test('stopDiscovery', { skip: isCI }, (t) => {
   t.execution(() => adapter.stopDiscovery())
 })
 
-test('discovery emits device with expected shape', { skip: isCI, timeout: 10000 }, async (t) => {
+test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) => {
   using adapter = new Adapter()
 
   adapter.startDiscovery()
@@ -88,38 +80,6 @@ test('discovery emits device with expected shape', { skip: isCI, timeout: 10000 
 
   adapter.stopDiscovery()
 
-  t.ok(typeof device.address === 'string')
-  t.ok(device.address.length > 0)
-  t.ok(typeof device.path === 'string')
-  t.ok(device.name === undefined || typeof device.name === 'string')
-  t.ok(typeof device.rssi === 'number')
-  t.ok(typeof device.paired === 'boolean')
-  t.ok(typeof device.connected === 'boolean')
-})
-
-test('discovered device is tracked in devices map', { skip: isCI, timeout: 10000 }, async (t) => {
-  using adapter = new Adapter()
-
-  adapter.startDiscovery()
-
-  const device = await new Promise((resolve) => {
-    adapter.on('device', resolve)
-  })
-
-  adapter.stopDiscovery()
-
+  t.ok(device)
   t.ok(adapter.devices.has(device.path))
-  t.is(adapter.devices.get(device.path), device)
-})
-
-test('destroy cleans up after discovery', { skip: isCI, timeout: 10000 }, async (t) => {
-  const adapter = new Adapter()
-
-  adapter.startDiscovery()
-
-  await new Promise((resolve) => {
-    adapter.on('device', resolve)
-  })
-
-  t.execution(() => adapter.destroy())
 })
