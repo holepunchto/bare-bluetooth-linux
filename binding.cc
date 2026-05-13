@@ -184,6 +184,7 @@ struct bare_bluetooth_linux_adapter_t {
   std::atomic<bool> running;
   std::atomic<int> tsfn_count;
   uv_thread_t thread;
+  uv_async_t cleanup_async;
   js_ref_t *ctx;
   js_threadsafe_function_t *tsfn_device_added;
   js_threadsafe_function_t *tsfn_device_removed;
@@ -380,12 +381,36 @@ bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void
 }
 
 static void
+bare_bluetooth_linux__on_cleanup_close(uv_handle_t *handle) {
+  (void) handle;
+}
+
+static void
+bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
+  auto *adapter = static_cast<bare_bluetooth_linux_adapter_t *>(async->data);
+
+  uv_thread_join(&adapter->thread);
+
+  int err;
+
+  err = js_release_threadsafe_function(adapter->tsfn_device_added, js_threadsafe_function_release);
+  assert(err == 0);
+
+  err = js_release_threadsafe_function(adapter->tsfn_device_removed, js_threadsafe_function_release);
+  assert(err == 0);
+
+  uv_close(reinterpret_cast<uv_handle_t *>(async), bare_bluetooth_linux__on_cleanup_close);
+}
+
+static void
 bare_bluetooth_linux__dbus_thread(void *data) {
   auto *adapter = static_cast<bare_bluetooth_linux_adapter_t *>(data);
 
   while (adapter->running.load()) {
     if (!dbus_connection_read_write_dispatch(adapter->signal_conn, DBUS_POLL_INTERVAL)) break;
   }
+
+  uv_async_send(&adapter->cleanup_async);
 }
 
 static js_arraybuffer_t
@@ -412,6 +437,15 @@ bare_bluetooth_linux_adapter_init(
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
+
+  uv_loop_t *loop;
+  err = js_get_env_loop(env, &loop);
+  assert(err == 0);
+
+  err = uv_async_init(loop, &adapter->cleanup_async, bare_bluetooth_linux__on_cleanup);
+  assert(err == 0);
+
+  adapter->cleanup_async.data = adapter;
 
   DBusError dbus_err;
 
@@ -471,15 +505,6 @@ bare_bluetooth_linux_adapter_destroy(
   if (!adapter->running.load()) return;
 
   adapter->running.store(false);
-  uv_thread_join(&adapter->thread);
-
-  int err;
-
-  err = js_release_threadsafe_function(adapter->tsfn_device_added, js_threadsafe_function_release);
-  assert(err == 0);
-
-  err = js_release_threadsafe_function(adapter->tsfn_device_removed, js_threadsafe_function_release);
-  assert(err == 0);
 }
 
 static bool
