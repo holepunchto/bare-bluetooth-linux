@@ -146,7 +146,7 @@ dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface,
   dbus_message_unref(msg);
 
   if (dbus_error_is_set(&err)) {
-    auto error = err.message;
+    std::string error = err.message;
     dbus_error_free(&err);
     return error;
   }
