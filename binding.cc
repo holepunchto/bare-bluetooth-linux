@@ -8,13 +8,14 @@
 #include <string>
 #include <uv.h>
 
-#define BLUEZ_BUS           "org.bluez"
-#define DBUS_PROP_IFACE     "org.freedesktop.DBus.Properties"
-#define DBUS_OM_IFACE       "org.freedesktop.DBus.ObjectManager"
-#define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
-#define BLUEZ_DEVICE_IFACE  "org.bluez.Device1"
-#define DBUS_TIMEOUT        2000
-#define DBUS_POLL_INTERVAL  200
+#define BLUEZ_BUS            "org.bluez"
+#define DBUS_PROP_IFACE      "org.freedesktop.DBus.Properties"
+#define DBUS_OM_IFACE        "org.freedesktop.DBus.ObjectManager"
+#define BLUEZ_ADAPTER_IFACE  "org.bluez.Adapter1"
+#define BLUEZ_DEVICE_IFACE   "org.bluez.Device1"
+#define DBUS_TIMEOUT         2000
+#define DBUS_CONNECT_TIMEOUT 30000
+#define DBUS_POLL_INTERVAL   200
 
 static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
@@ -134,14 +135,14 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
 }
 
 static std::optional<std::string>
-dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method) {
+dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, iface, method);
 
   DBusError err;
   dbus_error_init(&err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
+    dbus_connection_send_with_reply_and_block(conn, msg, timeout, &err);
   dbus_message_unref(msg);
 
   if (dbus_error_is_set(&err)) {
@@ -592,6 +593,48 @@ bare_bluetooth_linux_device_get_connected(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connected");
 }
 
+static void
+bare_bluetooth_linux_device_connect(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path
+) {
+  auto error = dbus_call_void_method(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connect", DBUS_CONNECT_TIMEOUT);
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
+}
+
+static void
+bare_bluetooth_linux_device_disconnect(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path
+) {
+  auto error = dbus_call_void_method(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Disconnect");
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
+}
+
+static void
+bare_bluetooth_linux_device_pair(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path
+) {
+  auto error = dbus_call_void_method(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Pair", DBUS_CONNECT_TIMEOUT);
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -614,6 +657,9 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)
   V("deviceGetConnected", bare_bluetooth_linux_device_get_connected)
+  V("deviceConnect", bare_bluetooth_linux_device_connect)
+  V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
+  V("devicePair", bare_bluetooth_linux_device_pair)
 
 #undef V
 

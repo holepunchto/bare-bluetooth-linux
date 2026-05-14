@@ -27,6 +27,39 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(typeof device.connected === 'boolean')
 })
 
+test('device connect and disconnect', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const device = await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  t.execution(() => device.connect())
+  t.is(device.connected, true)
+
+  t.execution(() => device.disconnect())
+  t.is(device.connected, false)
+})
+
+test('device pair', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const device = await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  t.execution(() => device.pair())
+  t.is(device.paired, true)
+})
+
 test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, async (t) => {
   const adapter = new Adapter()
 
