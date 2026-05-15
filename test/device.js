@@ -95,3 +95,14 @@ test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, 
   t.ok(typeof device.address === 'string')
   t.ok(typeof device.path === 'string')
 })
+
+test('device methods after adapter destroy', { skip: isCI }, (t) => {
+  const adapter = new Adapter()
+  const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
+
+  adapter.destroy()
+
+  t.is(device.connect(), undefined)
+  t.is(device.disconnect(), undefined)
+  t.is(device.pair(), undefined)
+})

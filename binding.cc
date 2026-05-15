@@ -614,7 +614,7 @@ bare_bluetooth_linux_device_disconnect(
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   std::string path
 ) {
-  auto error = dbus_call_void_method(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Disconnect");
+  auto error = dbus_call_void_method(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Disconnect", DBUS_CONNECT_TIMEOUT);
   if (error) {
     int err = js_throw_error(env, nullptr, error->c_str());
     assert(err == 0);
