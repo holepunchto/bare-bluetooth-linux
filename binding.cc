@@ -686,7 +686,7 @@ bare_bluetooth_linux_device_get_connected(
 static void
 bare_bluetooth_linux__device_call_method(
   js_env_t *env,
-  bare_bluetooth_linux_adapter_t *adapter,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   const char *path,
   const char *method,
   int timeout,
@@ -724,7 +724,7 @@ bare_bluetooth_linux_device_connect(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, &adapter[0], path.c_str(), "Connect", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__device_call_method(env, adapter, path.c_str(), "Connect", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static void
@@ -735,7 +735,7 @@ bare_bluetooth_linux_device_disconnect(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, &adapter[0], path.c_str(), "Disconnect", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__device_call_method(env, adapter, path.c_str(), "Disconnect", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static void
@@ -746,7 +746,7 @@ bare_bluetooth_linux_device_pair(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, &adapter[0], path.c_str(), "Pair", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__device_call_method(env, adapter, path.c_str(), "Pair", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static js_value_t *
