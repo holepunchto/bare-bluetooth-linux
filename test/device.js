@@ -27,7 +27,7 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(typeof device.connected === 'boolean')
 })
 
-test('device connect', { skip: isCI }, async (t) => {
+test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
   adapter.startDiscovery()
@@ -40,19 +40,27 @@ test('device connect', { skip: isCI }, async (t) => {
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
-  try {
-    device.connect()
-    t.comment('connected: ' + device.connected)
-    t.is(device.connected, true)
-    device.disconnect()
+  const connectErr = await new Promise((resolve) => device.connect(resolve))
+
+  if (connectErr) {
+    t.comment('connect error: ' + connectErr.message)
+    t.pass('connect failed (device may not support it)')
+    return
+  }
+
+  t.comment('connected: ' + device.connected)
+  t.is(device.connected, true)
+
+  const disconnectErr = await new Promise((resolve) => device.disconnect(resolve))
+
+  if (disconnectErr) {
+    t.comment('disconnect error: ' + disconnectErr.message)
+  } else {
     t.comment('disconnected: ' + device.connected)
-  } catch (e) {
-    t.comment('connect/disconnect error: ' + e.message)
-    t.pass('connect threw (device may not support it)')
   }
 })
 
-test('device pair', { skip: isCI }, async (t) => {
+test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
   adapter.startDiscovery()
@@ -66,13 +74,14 @@ test('device pair', { skip: isCI }, async (t) => {
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
   t.comment('paired before: ' + device.paired)
 
-  try {
-    device.pair()
+  const pairErr = await new Promise((resolve) => device.pair(resolve))
+
+  if (pairErr) {
+    t.comment('pair error: ' + pairErr.message)
+    t.pass('pair failed (device may not support it)')
+  } else {
     t.comment('paired after: ' + device.paired)
     t.is(device.paired, true)
-  } catch (e) {
-    t.comment('pair error: ' + e.message)
-    t.pass('pair threw (device may not support it)')
   }
 })
 
