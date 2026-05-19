@@ -175,7 +175,7 @@ struct bare_bluetooth_linux_tsfn_ctx_t {
 struct bare_bluetooth_linux_async_call_t {
   uv_work_t work;
   js_env_t *env;
-  js_persistent_t<js_function_t<void, std::optional<std::string>>> cb;
+  js_persistent_t<js_function_t<void, js_object_t>> cb;
   js_deferred_teardown_t *teardown;
   std::string path;
   std::string iface;
@@ -306,11 +306,23 @@ bare_bluetooth_linux__async_call_complete(uv_work_t *uv_req, int status) {
   err = js_open_handle_scope(call->env, &scope);
   assert(err == 0);
 
-  js_function_t<void, std::optional<std::string>> callback;
+  js_function_t<void, js_object_t> callback;
   err = js_get_reference_value(call->env, call->cb, callback);
   assert(err == 0);
 
-  err = js_call_function_with_checkpoint(call->env, callback, call->error);
+  js_object_t error;
+
+  if (call->error) {
+    err = js_create_error(call->env, call->error->c_str(), error);
+    assert(err == 0);
+  } else {
+    js_value_t *null_val;
+    err = js_get_null(call->env, &null_val);
+    assert(err == 0);
+    error = js_object_t(null_val);
+  }
+
+  err = js_call_function_with_checkpoint(call->env, callback, error);
   assert(err != js_pending_exception);
 
   err = js_close_handle_scope(call->env, scope);
@@ -677,7 +689,7 @@ bare_bluetooth_linux_device_connect(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   std::string path,
-  js_function_t<void, std::optional<std::string>> callback
+  js_function_t<void, js_object_t> callback
 ) {
   auto *call = new bare_bluetooth_linux_async_call_t(env);
   call->path = path;
@@ -703,7 +715,7 @@ bare_bluetooth_linux_device_disconnect(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   std::string path,
-  js_function_t<void, std::optional<std::string>> callback
+  js_function_t<void, js_object_t> callback
 ) {
   auto *call = new bare_bluetooth_linux_async_call_t(env);
   call->path = path;
@@ -729,7 +741,7 @@ bare_bluetooth_linux_device_pair(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   std::string path,
-  js_function_t<void, std::optional<std::string>> callback
+  js_function_t<void, js_object_t> callback
 ) {
   auto *call = new bare_bluetooth_linux_async_call_t(env);
   call->path = path;
