@@ -134,26 +134,37 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
     dbus_error_free(&err);
 }
 
-static std::optional<std::string>
+static DBusPendingCall *
 dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, iface, method);
 
-  DBusError err;
-  dbus_error_init(&err);
-  DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, timeout, &err);
+  DBusPendingCall *pending;
+  dbus_connection_send_with_reply(conn, msg, &pending, timeout);
   dbus_message_unref(msg);
 
-  if (dbus_error_is_set(&err)) {
+  return pending;
+}
+
+static std::optional<std::string>
+dbus_call_void_method_sync(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
+  DBusPendingCall *pending = dbus_call_void_method(conn, path, iface, method, timeout);
+
+  dbus_pending_call_block(pending);
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  dbus_pending_call_unref(pending);
+
+  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
+    DBusError err;
+    dbus_error_init(&err);
+    dbus_set_error_from_message(&err, reply);
     std::string error = err.message;
     dbus_error_free(&err);
+    dbus_message_unref(reply);
     return error;
   }
 
-  if (reply)
-    dbus_message_unref(reply);
-
+  dbus_message_unref(reply);
   return std::nullopt;
 }
 
@@ -627,7 +638,7 @@ static void
 bare_bluetooth_linux_adapter_start_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
+  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
   if (error) {
     int err = js_throw_error(env, nullptr, error->c_str());
     assert(err == 0);
@@ -638,7 +649,7 @@ static void
 bare_bluetooth_linux_adapter_stop_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
+  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
   if (error) {
     int err = js_throw_error(env, nullptr, error->c_str());
     assert(err == 0);
@@ -697,11 +708,7 @@ bare_bluetooth_linux__device_call_method(
   err = js_create_reference(env, callback, call->cb);
   assert(err == 0);
 
-  DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_DEVICE_IFACE, method.c_str());
-
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, timeout);
-  dbus_message_unref(msg);
+  DBusPendingCall *pending = dbus_call_void_method(adapter->signal_conn, path.c_str(), BLUEZ_DEVICE_IFACE, method.c_str(), timeout);
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
 }
