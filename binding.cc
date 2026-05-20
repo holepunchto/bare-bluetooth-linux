@@ -8,13 +8,14 @@
 #include <string>
 #include <uv.h>
 
-#define BLUEZ_BUS           "org.bluez"
-#define DBUS_PROP_IFACE     "org.freedesktop.DBus.Properties"
-#define DBUS_OM_IFACE       "org.freedesktop.DBus.ObjectManager"
-#define BLUEZ_ADAPTER_IFACE "org.bluez.Adapter1"
-#define BLUEZ_DEVICE_IFACE  "org.bluez.Device1"
-#define DBUS_TIMEOUT        2000
-#define DBUS_POLL_INTERVAL  200
+#define BLUEZ_BUS            "org.bluez"
+#define DBUS_PROP_IFACE      "org.freedesktop.DBus.Properties"
+#define DBUS_OM_IFACE        "org.freedesktop.DBus.ObjectManager"
+#define BLUEZ_ADAPTER_IFACE  "org.bluez.Adapter1"
+#define BLUEZ_DEVICE_IFACE   "org.bluez.Device1"
+#define DBUS_TIMEOUT         2000
+#define DBUS_CONNECT_TIMEOUT 30000
+#define DBUS_POLL_INTERVAL   200
 
 static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
@@ -133,26 +134,37 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
     dbus_error_free(&err);
 }
 
-static std::optional<std::string>
-dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method) {
+static DBusPendingCall *
+dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, iface, method);
 
-  DBusError err;
-  dbus_error_init(&err);
-  DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
+  DBusPendingCall *pending;
+  dbus_connection_send_with_reply(conn, msg, &pending, timeout);
   dbus_message_unref(msg);
 
-  if (dbus_error_is_set(&err)) {
-    auto error = err.message;
+  return pending;
+}
+
+static std::optional<std::string>
+dbus_call_void_method_sync(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
+  DBusPendingCall *pending = dbus_call_void_method(conn, path, iface, method, timeout);
+
+  dbus_pending_call_block(pending);
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  dbus_pending_call_unref(pending);
+
+  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
+    DBusError err;
+    dbus_error_init(&err);
+    dbus_set_error_from_message(&err, reply);
+    std::string error = err.message;
     dbus_error_free(&err);
+    dbus_message_unref(reply);
     return error;
   }
 
-  if (reply)
-    dbus_message_unref(reply);
-
+  dbus_message_unref(reply);
   return std::nullopt;
 }
 
@@ -171,6 +183,19 @@ struct bare_bluetooth_linux_tsfn_ctx_t {
   bare_bluetooth_linux_adapter_t *adapter;
 };
 
+struct bare_bluetooth_linux_async_call_t {
+  js_env_t *env;
+  js_persistent_t<js_function_t<void, js_object_t>> cb;
+  bare_bluetooth_linux_adapter_t *adapter;
+  std::optional<std::string> error;
+};
+
+static void
+bare_bluetooth_linux__noop(js_env_t *env, js_receiver_t) {}
+
+using bare_bluetooth_linux__noop_fn =
+  js_function_t<void, js_receiver_t>;
+
 using bare_bluetooth_linux__on_device_added_fn =
   js_function_t<void, js_receiver_t, std::string, std::string>;
 
@@ -188,6 +213,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_ref_t *ctx;
   js_threadsafe_function_t *tsfn_device_added;
   js_threadsafe_function_t *tsfn_device_removed;
+  js_threadsafe_function_t *tsfn_method_reply;
 };
 
 static void
@@ -238,6 +264,62 @@ bare_bluetooth_linux__on_device_removed(
 
   err = js_close_handle_scope(env, scope);
   assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux__on_pending_call_notify(DBusPendingCall *pending, void *data) {
+  auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
+
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+
+  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
+    DBusError err;
+    dbus_error_init(&err);
+    dbus_set_error_from_message(&err, reply);
+    call->error = std::string(err.message);
+    dbus_error_free(&err);
+  }
+
+  dbus_message_unref(reply);
+  dbus_pending_call_unref(pending);
+
+  js_call_threadsafe_function(call->adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
+}
+
+static void
+bare_bluetooth_linux__on_method_reply(
+  js_env_t *env,
+  bare_bluetooth_linux__noop_fn function,
+  bare_bluetooth_linux_tsfn_ctx_t *ctx,
+  bare_bluetooth_linux_async_call_t *call
+) {
+  int err;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_function_t<void, js_object_t> callback;
+  err = js_get_reference_value(env, call->cb, callback);
+  assert(err == 0);
+
+  js_object_t error;
+
+  if (call->error) {
+    err = js_create_error(env, call->error->c_str(), error);
+    assert(err == 0);
+  } else {
+    err = js_get_null(env, error);
+    assert(err == 0);
+  }
+
+  err = js_call_function_with_checkpoint(env, callback, error);
+  assert(err != js_pending_exception);
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+
+  delete call;
 }
 
 static void
@@ -399,6 +481,9 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_device_removed, js_threadsafe_function_release);
   assert(err == 0);
 
+  err = js_release_threadsafe_function(adapter->tsfn_method_reply, js_threadsafe_function_release);
+  assert(err == 0);
+
   uv_close(reinterpret_cast<uv_handle_t *>(async), bare_bluetooth_linux__on_cleanup_close);
 }
 
@@ -433,7 +518,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
-  adapter->tsfn_count.store(2);
+  adapter->tsfn_count.store(3);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
@@ -491,6 +576,18 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux_device_removed_event_t>(env, on_device_removed, 0, 1, removed_ctx, adapter->tsfn_device_removed);
   assert(err == 0);
 
+  bare_bluetooth_linux__noop_fn noop;
+  err = js_create_function<bare_bluetooth_linux__noop>(env, noop);
+  assert(err == 0);
+
+  auto *reply_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  err = js_create_threadsafe_function<
+    bare_bluetooth_linux__on_method_reply,
+    bare_bluetooth_linux__on_tsfn_finalize,
+    bare_bluetooth_linux_tsfn_ctx_t,
+    bare_bluetooth_linux_async_call_t>(env, noop, 0, 1, reply_ctx, adapter->tsfn_method_reply);
+  assert(err == 0);
+
   uv_thread_create(&adapter->thread, bare_bluetooth_linux__dbus_thread, adapter);
 
   return handle;
@@ -539,7 +636,7 @@ static void
 bare_bluetooth_linux_adapter_start_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
+  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
   if (error) {
     int err = js_throw_error(env, nullptr, error->c_str());
     assert(err == 0);
@@ -550,7 +647,7 @@ static void
 bare_bluetooth_linux_adapter_stop_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
-  auto error = dbus_call_void_method(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
+  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
   if (error) {
     int err = js_throw_error(env, nullptr, error->c_str());
     assert(err == 0);
@@ -592,6 +689,61 @@ bare_bluetooth_linux_device_get_connected(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connected");
 }
 
+static void
+bare_bluetooth_linux__device_call_method(
+  js_env_t *env,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path,
+  std::string method,
+  int timeout,
+  js_function_t<void, js_object_t> callback
+) {
+  auto *call = new bare_bluetooth_linux_async_call_t();
+  call->env = env;
+  call->adapter = &*adapter;
+
+  int err;
+  err = js_create_reference(env, callback, call->cb);
+  assert(err == 0);
+
+  DBusPendingCall *pending = dbus_call_void_method(adapter->signal_conn, path.c_str(), BLUEZ_DEVICE_IFACE, method.c_str(), timeout);
+
+  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+}
+
+static void
+bare_bluetooth_linux_device_connect(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path,
+  js_function_t<void, js_object_t> callback
+) {
+  bare_bluetooth_linux__device_call_method(env, adapter, path, "Connect", DBUS_CONNECT_TIMEOUT, callback);
+}
+
+static void
+bare_bluetooth_linux_device_disconnect(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path,
+  js_function_t<void, js_object_t> callback
+) {
+  bare_bluetooth_linux__device_call_method(env, adapter, path, "Disconnect", DBUS_CONNECT_TIMEOUT, callback);
+}
+
+static void
+bare_bluetooth_linux_device_pair(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path,
+  js_function_t<void, js_object_t> callback
+) {
+  bare_bluetooth_linux__device_call_method(env, adapter, path, "Pair", DBUS_CONNECT_TIMEOUT, callback);
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -614,6 +766,9 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)
   V("deviceGetConnected", bare_bluetooth_linux_device_get_connected)
+  V("deviceConnect", bare_bluetooth_linux_device_connect)
+  V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
+  V("devicePair", bare_bluetooth_linux_device_pair)
 
 #undef V
 
