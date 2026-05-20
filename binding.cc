@@ -309,10 +309,8 @@ bare_bluetooth_linux__on_method_reply(
     err = js_create_error(env, call->error->c_str(), error);
     assert(err == 0);
   } else {
-    js_value_t *null_val;
-    err = js_get_null(env, &null_val);
+    err = js_get_null(env, error);
     assert(err == 0);
-    error = js_object_t(null_val);
   }
 
   err = js_call_function_with_checkpoint(env, callback, error);
