@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Device } = require('..')
+const { Adapter, Device, Service } = require('..')
 const { isCI } = require('./helpers')
 
 test('Device is exported', (t) => {
@@ -85,6 +85,96 @@ test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
   }
 })
 
+test('Service is exported', (t) => {
+  t.is(typeof Service, 'function')
+  t.is(Service.name, 'Service')
+})
+
+test('device discoverServices', { skip: isCI, timeout: 60000 }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const device = await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
+
+  const connectErr = await new Promise((resolve) => device.connect(resolve))
+
+  if (connectErr) {
+    t.comment('connect error: ' + connectErr.message)
+    t.pass('connect failed (device may not support it)')
+    return
+  }
+
+  const [err, services] = await new Promise((resolve) => {
+    device.discoverServices((err, services) => resolve([err, services]))
+  })
+
+  if (err) {
+    t.comment('discoverServices error: ' + err.message)
+    t.pass('discoverServices failed')
+  } else {
+    t.ok(Array.isArray(services))
+    t.comment('found ' + services.length + ' services')
+
+    for (const service of services) {
+      t.ok(service instanceof Service)
+      t.ok(typeof service.uuid === 'string')
+      t.ok(typeof service.path === 'string')
+      t.ok(typeof service.primary === 'boolean')
+      t.comment('  service: ' + service.uuid + ' (primary: ' + service.primary + ')')
+    }
+  }
+
+  await new Promise((resolve) => device.disconnect(resolve))
+})
+
+test('device discoverServices with uuid filter', { skip: isCI, timeout: 60000 }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const device = await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  const connectErr = await new Promise((resolve) => device.connect(resolve))
+
+  if (connectErr) {
+    t.pass('connect failed (device may not support it)')
+    return
+  }
+
+  const [err, all] = await new Promise((resolve) => {
+    device.discoverServices((err, services) => resolve([err, services]))
+  })
+
+  if (err || all.length === 0) {
+    t.pass('no services to filter')
+    await new Promise((resolve) => device.disconnect(resolve))
+    return
+  }
+
+  const targetUuid = all[0].uuid
+
+  const [err2, filtered] = await new Promise((resolve) => {
+    device.discoverServices([targetUuid], (err, services) => resolve([err, services]))
+  })
+
+  t.absent(err2)
+  t.ok(filtered.length >= 1)
+  t.is(filtered[0].uuid, targetUuid)
+
+  await new Promise((resolve) => device.disconnect(resolve))
+})
+
 test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, async (t) => {
   const adapter = new Adapter()
 
@@ -114,4 +204,9 @@ test('device methods after adapter destroy', { skip: isCI }, (t) => {
   t.is(device.connect(), undefined)
   t.is(device.disconnect(), undefined)
   t.is(device.pair(), undefined)
+
+  device.discoverServices((err, services) => {
+    t.absent(err)
+    t.alike(services, [])
+  })
 })

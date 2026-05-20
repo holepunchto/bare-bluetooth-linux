@@ -12,7 +12,8 @@
 #define DBUS_PROP_IFACE      "org.freedesktop.DBus.Properties"
 #define DBUS_OM_IFACE        "org.freedesktop.DBus.ObjectManager"
 #define BLUEZ_ADAPTER_IFACE  "org.bluez.Adapter1"
-#define BLUEZ_DEVICE_IFACE   "org.bluez.Device1"
+#define BLUEZ_DEVICE_IFACE       "org.bluez.Device1"
+#define BLUEZ_GATT_SERVICE_IFACE "org.bluez.GattService1"
 #define DBUS_TIMEOUT         2000
 #define DBUS_CONNECT_TIMEOUT 30000
 #define DBUS_POLL_INTERVAL   200
@@ -744,6 +745,111 @@ bare_bluetooth_linux_device_pair(
   bare_bluetooth_linux__device_call_method(env, adapter, path, "Pair", DBUS_CONNECT_TIMEOUT, callback);
 }
 
+static void
+bare_bluetooth_linux_device_discover_services(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string device_path,
+  js_function_t<void, std::string, std::string, bool> on_service
+) {
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, "/", DBUS_OM_IFACE, "GetManagedObjects");
+
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  dbus_message_unref(msg);
+
+  if (dbus_error_is_set(&dbus_err)) {
+    int err = js_throw_error(env, nullptr, dbus_err.message);
+    assert(err == 0);
+    dbus_error_free(&dbus_err);
+    return;
+  }
+
+  if (!reply) return;
+
+  std::string prefix = device_path + "/";
+
+  DBusMessageIter iter;
+  if (!dbus_message_iter_init(reply, &iter)) {
+    dbus_message_unref(reply);
+    return;
+  }
+
+  DBusMessageIter objects_iter;
+  dbus_message_iter_recurse(&iter, &objects_iter);
+
+  while (dbus_message_iter_get_arg_type(&objects_iter) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter entry;
+    dbus_message_iter_recurse(&objects_iter, &entry);
+
+    const char *obj_path;
+    dbus_message_iter_get_basic(&entry, &obj_path);
+
+    if (strncmp(obj_path, prefix.c_str(), prefix.length()) == 0) {
+      dbus_message_iter_next(&entry);
+
+      DBusMessageIter ifaces_iter;
+      dbus_message_iter_recurse(&entry, &ifaces_iter);
+
+      while (dbus_message_iter_get_arg_type(&ifaces_iter) == DBUS_TYPE_DICT_ENTRY) {
+        DBusMessageIter iface_entry;
+        dbus_message_iter_recurse(&ifaces_iter, &iface_entry);
+
+        const char *iface_name;
+        dbus_message_iter_get_basic(&iface_entry, &iface_name);
+
+        if (strcmp(iface_name, BLUEZ_GATT_SERVICE_IFACE) == 0) {
+          dbus_message_iter_next(&iface_entry);
+
+          DBusMessageIter props_iter;
+          dbus_message_iter_recurse(&iface_entry, &props_iter);
+
+          std::string uuid;
+          bool primary = false;
+
+          while (dbus_message_iter_get_arg_type(&props_iter) == DBUS_TYPE_DICT_ENTRY) {
+            DBusMessageIter prop_entry;
+            dbus_message_iter_recurse(&props_iter, &prop_entry);
+
+            const char *prop_name;
+            dbus_message_iter_get_basic(&prop_entry, &prop_name);
+            dbus_message_iter_next(&prop_entry);
+
+            DBusMessageIter variant;
+            dbus_message_iter_recurse(&prop_entry, &variant);
+
+            if (strcmp(prop_name, "UUID") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
+              const char *val;
+              dbus_message_iter_get_basic(&variant, &val);
+              uuid = val;
+            } else if (strcmp(prop_name, "Primary") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+              dbus_bool_t val;
+              dbus_message_iter_get_basic(&variant, &val);
+              primary = val;
+            }
+
+            dbus_message_iter_next(&props_iter);
+          }
+
+          if (!uuid.empty()) {
+            js_call_function(env, on_service, std::string(obj_path), uuid, primary);
+          }
+        }
+
+        dbus_message_iter_next(&ifaces_iter);
+      }
+    }
+
+    dbus_message_iter_next(&objects_iter);
+  }
+
+  dbus_message_unref(reply);
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -769,6 +875,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceConnect", bare_bluetooth_linux_device_connect)
   V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
   V("devicePair", bare_bluetooth_linux_device_pair)
+  V("deviceDiscoverServices", bare_bluetooth_linux_device_discover_services)
 
 #undef V
 
