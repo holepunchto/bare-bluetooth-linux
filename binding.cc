@@ -207,11 +207,13 @@ struct bare_bluetooth_linux_device_removed_event_t {
 
 struct bare_bluetooth_linux_service_added_event_t {
   std::string path;
+  std::string device_path;
   std::string uuid;
 };
 
 struct bare_bluetooth_linux_service_removed_event_t {
   std::string path;
+  std::string device_path;
 };
 
 struct bare_bluetooth_linux_tsfn_ctx_t {
@@ -238,10 +240,10 @@ using bare_bluetooth_linux__on_device_removed_fn =
   js_function_t<void, js_receiver_t, std::string>;
 
 using bare_bluetooth_linux__on_service_added_fn =
-  js_function_t<void, js_receiver_t, std::string, std::string>;
+  js_function_t<void, js_receiver_t, std::string, std::string, std::string>;
 
 using bare_bluetooth_linux__on_service_removed_fn =
-  js_function_t<void, js_receiver_t, std::string>;
+  js_function_t<void, js_receiver_t, std::string, std::string>;
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
@@ -326,7 +328,7 @@ bare_bluetooth_linux__on_service_added(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->uuid);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path, event->uuid);
 
   delete event;
 
@@ -351,7 +353,7 @@ bare_bluetooth_linux__on_service_removed(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path);
 
   delete event;
 
@@ -470,14 +472,20 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
       DBusMessageIter props_iter;
       dbus_message_iter_recurse(&entry, &props_iter);
       auto addr = dbus_find_string_in_props(&props_iter, "Address");
-      if (addr) { is_device = true; address = *addr; }
+      if (addr) {
+        is_device = true;
+        address = *addr;
+      }
 
     } else if (strcmp(iface_name, BLUEZ_GATT_SERVICE_IFACE) == 0) {
       dbus_message_iter_next(&entry);
       DBusMessageIter props_iter;
       dbus_message_iter_recurse(&entry, &props_iter);
       auto svc_uuid = dbus_find_string_in_props(&props_iter, "UUID");
-      if (svc_uuid) { is_service = true; uuid = *svc_uuid; }
+      if (svc_uuid) {
+        is_service = true;
+        uuid = *svc_uuid;
+      }
     }
 
     dbus_message_iter_next(&ifaces_iter);
@@ -491,8 +499,10 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
   }
 
   if (is_service && !uuid.empty()) {
+    std::string svc_path(obj_path);
     auto *event = new bare_bluetooth_linux_service_added_event_t;
-    event->path = obj_path;
+    event->path = svc_path;
+    event->device_path = svc_path.substr(0, svc_path.rfind('/'));
     event->uuid = uuid;
     js_call_threadsafe_function(adapter->tsfn_service_added, event, js_threadsafe_function_nonblocking);
   }
@@ -534,8 +544,10 @@ bare_bluetooth_linux__on_interfaces_removed(bare_bluetooth_linux_adapter_t *adap
   }
 
   if (is_service) {
+    std::string svc_path(obj_path);
     auto *event = new bare_bluetooth_linux_service_removed_event_t;
-    event->path = obj_path;
+    event->path = svc_path;
+    event->device_path = svc_path.substr(0, svc_path.rfind('/'));
     js_call_threadsafe_function(adapter->tsfn_service_removed, event, js_threadsafe_function_nonblocking);
   }
 }
