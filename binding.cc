@@ -207,13 +207,17 @@ struct bare_bluetooth_linux_device_removed_event_t {
 
 struct bare_bluetooth_linux_service_added_event_t {
   std::string path;
-  std::string device_path;
   std::string uuid;
+
+  std::string
+  device_path() const { return path.substr(0, path.rfind('/')); }
 };
 
 struct bare_bluetooth_linux_service_removed_event_t {
   std::string path;
-  std::string device_path;
+
+  std::string
+  device_path() const { return path.substr(0, path.rfind('/')); }
 };
 
 struct bare_bluetooth_linux_tsfn_ctx_t {
@@ -328,7 +332,7 @@ bare_bluetooth_linux__on_service_added(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path, event->uuid);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path(), event->uuid);
 
   delete event;
 
@@ -353,7 +357,7 @@ bare_bluetooth_linux__on_service_removed(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->device_path());
 
   delete event;
 
@@ -499,10 +503,8 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
   }
 
   if (is_service && !uuid.empty()) {
-    std::string svc_path(obj_path);
     auto *event = new bare_bluetooth_linux_service_added_event_t;
-    event->path = svc_path;
-    event->device_path = svc_path.substr(0, svc_path.rfind('/'));
+    event->path = obj_path;
     event->uuid = uuid;
     js_call_threadsafe_function(adapter->tsfn_service_added, event, js_threadsafe_function_nonblocking);
   }
@@ -544,10 +546,8 @@ bare_bluetooth_linux__on_interfaces_removed(bare_bluetooth_linux_adapter_t *adap
   }
 
   if (is_service) {
-    std::string svc_path(obj_path);
     auto *event = new bare_bluetooth_linux_service_removed_event_t;
-    event->path = svc_path;
-    event->device_path = svc_path.substr(0, svc_path.rfind('/'));
+    event->path = obj_path;
     js_call_threadsafe_function(adapter->tsfn_service_removed, event, js_threadsafe_function_nonblocking);
   }
 }
