@@ -108,6 +108,31 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
   return result;
 }
 
+static std::optional<std::string>
+dbus_find_string_in_props(DBusMessageIter *props_iter, const char *target_prop) {
+  while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter prop_entry;
+    dbus_message_iter_recurse(props_iter, &prop_entry);
+
+    const char *prop_name;
+    dbus_message_iter_get_basic(&prop_entry, &prop_name);
+
+    if (strcmp(prop_name, target_prop) == 0) {
+      dbus_message_iter_next(&prop_entry);
+      DBusMessageIter variant;
+      dbus_message_iter_recurse(&prop_entry, &variant);
+      if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
+        const char *val;
+        dbus_message_iter_get_basic(&variant, &val);
+        return std::string(val);
+      }
+    }
+
+    dbus_message_iter_next(props_iter);
+  }
+  return std::nullopt;
+}
+
 static void
 dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
   DBusMessage *msg =
@@ -441,59 +466,18 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
     dbus_message_iter_get_basic(&entry, &iface_name);
 
     if (strcmp(iface_name, BLUEZ_DEVICE_IFACE) == 0) {
-      is_device = true;
       dbus_message_iter_next(&entry);
-
       DBusMessageIter props_iter;
       dbus_message_iter_recurse(&entry, &props_iter);
+      auto addr = dbus_find_string_in_props(&props_iter, "Address");
+      if (addr) { is_device = true; address = *addr; }
 
-      while (dbus_message_iter_get_arg_type(&props_iter) == DBUS_TYPE_DICT_ENTRY) {
-        DBusMessageIter prop_entry;
-        dbus_message_iter_recurse(&props_iter, &prop_entry);
-
-        const char *prop_name;
-        dbus_message_iter_get_basic(&prop_entry, &prop_name);
-
-        if (strcmp(prop_name, "Address") == 0) {
-          dbus_message_iter_next(&prop_entry);
-          DBusMessageIter variant;
-          dbus_message_iter_recurse(&prop_entry, &variant);
-          if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
-            const char *addr;
-            dbus_message_iter_get_basic(&variant, &addr);
-            address = addr;
-          }
-        }
-
-        dbus_message_iter_next(&props_iter);
-      }
     } else if (strcmp(iface_name, BLUEZ_GATT_SERVICE_IFACE) == 0) {
-      is_service = true;
       dbus_message_iter_next(&entry);
-
       DBusMessageIter props_iter;
       dbus_message_iter_recurse(&entry, &props_iter);
-
-      while (dbus_message_iter_get_arg_type(&props_iter) == DBUS_TYPE_DICT_ENTRY) {
-        DBusMessageIter prop_entry;
-        dbus_message_iter_recurse(&props_iter, &prop_entry);
-
-        const char *prop_name;
-        dbus_message_iter_get_basic(&prop_entry, &prop_name);
-
-        if (strcmp(prop_name, "UUID") == 0) {
-          dbus_message_iter_next(&prop_entry);
-          DBusMessageIter variant;
-          dbus_message_iter_recurse(&prop_entry, &variant);
-          if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
-            const char *val;
-            dbus_message_iter_get_basic(&variant, &val);
-            uuid = val;
-          }
-        }
-
-        dbus_message_iter_next(&props_iter);
-      }
+      auto svc_uuid = dbus_find_string_in_props(&props_iter, "UUID");
+      if (svc_uuid) { is_service = true; uuid = *svc_uuid; }
     }
 
     dbus_message_iter_next(&ifaces_iter);
