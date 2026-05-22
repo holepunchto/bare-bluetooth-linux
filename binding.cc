@@ -879,7 +879,7 @@ bare_bluetooth_linux_device_pair(
 }
 
 static bool
-bare_bluetooth_linux_service_get_primary(
+bare_bluetooth_linux_service_is_primary(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_GATT_SERVICE_IFACE, "Primary");
@@ -911,7 +911,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
   V("devicePair", bare_bluetooth_linux_device_pair)
 
-  V("serviceGetPrimary", bare_bluetooth_linux_service_get_primary)
+  V("serviceIsPrimary", bare_bluetooth_linux_service_is_primary)
 
 #undef V
 
