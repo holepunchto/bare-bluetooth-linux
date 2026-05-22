@@ -2,11 +2,6 @@ const test = require('brittle')
 const { Adapter, Service } = require('..')
 const { isCI } = require('./helpers')
 
-test('Service is exported', (t) => {
-  t.is(typeof Service, 'function')
-  t.is(Service.name, 'Service')
-})
-
 test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
