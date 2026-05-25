@@ -50,11 +50,6 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   })
 })
 
-hook('teardown', { skip: isCI }, async (t) => {
-  if (device) await new Promise((resolve) => device.disconnect(resolve))
-  if (adapter) adapter.destroy()
-})
-
 test('characteristic is an instance of Characteristic', { skip: isCI }, (t) => {
   if (!needsCharacteristic(t)) return
   t.ok(characteristic instanceof Characteristic)
@@ -82,3 +77,9 @@ test('read returns a buffer', { skip: isCI }, (t) => {
   const data = characteristic.read()
   t.ok(data instanceof ArrayBuffer)
 })
+
+hook('teardown', { skip: isCI }, async (t) => {
+  if (device) await new Promise((resolve) => device.disconnect(resolve))
+  if (adapter) adapter.destroy()
+})
+
