@@ -1,3 +1,4 @@
 exports.Adapter = require('./lib/adapter')
 exports.Device = require('./lib/device')
 exports.Service = require('./lib/service')
+exports.Characteristic = require('./lib/characteristic')
