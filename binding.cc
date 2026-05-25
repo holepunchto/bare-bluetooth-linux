@@ -1012,10 +1012,12 @@ bare_bluetooth_linux_service_is_primary(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_GATT_SERVICE_IFACE, "Primary");
 }
 
-static js_value_t *
+static js_arraybuffer_t
 bare_bluetooth_linux_char_read(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
+  int err;
+
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "ReadValue");
 
@@ -1024,19 +1026,23 @@ bare_bluetooth_linux_char_read(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusError err;
-  dbus_error_init(&err);
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &err);
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
   dbus_message_unref(msg);
 
-  if (!reply || dbus_error_is_set(&err)) {
-    if (dbus_error_is_set(&err)) {
-      int e = js_throw_error(env, nullptr, err.message);
-      assert(e == 0);
-      dbus_error_free(&err);
+  if (!reply || dbus_error_is_set(&dbus_err)) {
+    if (dbus_error_is_set(&dbus_err)) {
+      err = js_throw_error(env, nullptr, dbus_err.message);
+      assert(err == 0);
+      dbus_error_free(&dbus_err);
     }
-    return nullptr;
+    js_arraybuffer_t empty;
+    std::span<uint8_t> ev;
+    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    assert(err == 0);
+    return empty;
   }
 
   DBusMessageIter reply_iter;
@@ -1044,24 +1050,28 @@ bare_bluetooth_linux_char_read(
 
   if (dbus_message_iter_get_arg_type(&reply_iter) != DBUS_TYPE_ARRAY) {
     dbus_message_unref(reply);
-    return nullptr;
+    js_arraybuffer_t empty;
+    std::span<uint8_t> ev;
+    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    assert(err == 0);
+    return empty;
   }
 
   DBusMessageIter array_iter;
   dbus_message_iter_recurse(&reply_iter, &array_iter);
 
   int len = dbus_message_iter_get_element_count(&reply_iter);
-  uint8_t *data;
 
-  js_value_t *buffer;
-  int e = js_create_arraybuffer(env, len, reinterpret_cast<void **>(&data), &buffer);
-  assert(e == 0);
+  js_arraybuffer_t buffer;
+  std::span<uint8_t> view;
+  err = js_create_arraybuffer(env, len, view, buffer);
+  assert(err == 0);
 
   int i = 0;
   while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
     uint8_t byte;
     dbus_message_iter_get_basic(&array_iter, &byte);
-    data[i++] = byte;
+    view[i++] = byte;
     dbus_message_iter_next(&array_iter);
   }
 
@@ -1071,12 +1081,14 @@ bare_bluetooth_linux_char_read(
 
 static void
 bare_bluetooth_linux_char_write(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t value
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t<uint8_t> value
 ) {
-  size_t len;
+  int err;
+
   uint8_t *data;
-  int e = js_get_typedarray_info(env, value, nullptr, reinterpret_cast<void **>(&data), &len, nullptr, nullptr);
-  assert(e == 0);
+  size_t len;
+  err = js_get_typedarray_info(env, value, data, len);
+  assert(err == 0);
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "WriteValue");
@@ -1093,18 +1105,18 @@ bare_bluetooth_linux_char_write(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusError err;
-  dbus_error_init(&err);
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
   DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &err);
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
   dbus_message_unref(msg);
 
   if (reply) dbus_message_unref(reply);
 
-  if (dbus_error_is_set(&err)) {
-    e = js_throw_error(env, nullptr, err.message);
-    assert(e == 0);
-    dbus_error_free(&err);
+  if (dbus_error_is_set(&dbus_err)) {
+    err = js_throw_error(env, nullptr, dbus_err.message);
+    assert(err == 0);
+    dbus_error_free(&dbus_err);
   }
 }
 
