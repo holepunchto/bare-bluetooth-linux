@@ -82,4 +82,3 @@ hook('teardown', { skip: isCI }, async (t) => {
   if (device) await new Promise((resolve) => device.disconnect(resolve))
   if (adapter) adapter.destroy()
 })
-
