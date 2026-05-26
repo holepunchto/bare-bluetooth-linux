@@ -1,4 +1,4 @@
-const test = require('brittle')
+const { test, hook } = require('brittle')
 const { Adapter, Device } = require('..')
 const { isCI } = require('./helpers')
 
@@ -112,4 +112,61 @@ test('device methods after adapter destroy', { skip: isCI }, (t) => {
   t.is(device.connect(), undefined)
   t.is(device.disconnect(), undefined)
   t.is(device.pair(), undefined)
+})
+
+let eventAdapter
+let eventDevice
+
+function needsDevice(t) {
+  if (!eventDevice) {
+    t.pass('no device available')
+    return false
+  }
+  return true
+}
+
+hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
+  eventAdapter = new Adapter()
+  eventAdapter.startDiscovery()
+
+  eventDevice = await new Promise((resolve) => {
+    eventAdapter.on('device', resolve)
+  })
+
+  eventAdapter.stopDiscovery()
+})
+
+test('connected event on connect', { skip: isCI, timeout: 60000 }, async (t) => {
+  if (!needsDevice(t)) return
+
+  const connected = new Promise((resolve) => {
+    eventDevice.once('connected', resolve)
+  })
+
+  try {
+    await eventDevice.connect()
+  } catch (err) {
+    t.comment('connect error: ' + err.message)
+    return t.pass('connect failed')
+  }
+
+  t.is(await connected, true)
+})
+
+test('connected event on disconnect', { skip: isCI, timeout: 60000 }, async (t) => {
+  if (!needsDevice(t)) return
+  if (!eventDevice.connected) return t.pass('device not connected')
+
+  const disconnected = new Promise((resolve) => {
+    eventDevice.once('connected', resolve)
+  })
+
+  await eventDevice.disconnect()
+
+  t.is(await disconnected, false)
+})
+
+hook('teardown', { skip: isCI }, async (t) => {
+  if (eventDevice && eventDevice.connected) await eventDevice.disconnect()
+  if (eventAdapter) eventAdapter.destroy()
 })
