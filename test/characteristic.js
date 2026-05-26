@@ -25,9 +25,10 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
 
   adapter.stopDiscovery()
 
-  const connectErr = await new Promise((resolve) => device.connect(resolve))
-  if (connectErr) {
-    t.comment('connect error: ' + connectErr.message)
+  try {
+    await device.connect()
+  } catch (err) {
+    t.comment('connect error: ' + err.message)
     return
   }
 
@@ -114,6 +115,6 @@ test('stopNotify disables notifications', { skip: isCI }, async (t) => {
 })
 
 hook('teardown', { skip: isCI }, async (t) => {
-  if (device) await new Promise((resolve) => device.disconnect(resolve))
+  if (device) await device.disconnect()
   if (adapter) adapter.destroy()
 })

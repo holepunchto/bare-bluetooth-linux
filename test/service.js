@@ -15,10 +15,10 @@ test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) 
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
-  const connectErr = await new Promise((resolve) => device.connect(resolve))
-
-  if (connectErr) {
-    t.comment('connect error: ' + connectErr.message)
+  try {
+    await device.connect()
+  } catch (err) {
+    t.comment('connect error: ' + err.message)
     t.pass('connect failed (device may not support it)')
     return
   }
@@ -42,5 +42,5 @@ test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) 
     t.ok(device.services.size > 0)
   }
 
-  await new Promise((resolve) => device.disconnect(resolve))
+  await device.disconnect()
 })
