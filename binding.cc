@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <uv.h>
+#include <vector>
 
 #define BLUEZ_BUS                "org.bluez"
 #define DBUS_PROP_IFACE          "org.freedesktop.DBus.Properties"
