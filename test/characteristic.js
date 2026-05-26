@@ -85,16 +85,16 @@ test('read returns a buffer', { skip: isCI }, (t) => {
   t.ok(data instanceof ArrayBuffer)
 })
 
-test('startNotify enables notifications', { skip: isCI }, (t) => {
+test('startNotify enables notifications', { skip: isCI }, async (t) => {
   if (!needsCharacteristic(t)) return
-  characteristic.startNotify()
-  t.pass()
+  const err = await new Promise((resolve) => characteristic.startNotify(resolve))
+  t.absent(err)
 })
 
 test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) => {
   if (!needsCharacteristic(t)) return
 
-  characteristic.startNotify()
+  await new Promise((resolve) => characteristic.startNotify(resolve))
 
   const data = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 5000)
@@ -107,10 +107,10 @@ test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) =
   t.ok(data instanceof ArrayBuffer)
 })
 
-test('stopNotify disables notifications', { skip: isCI }, (t) => {
+test('stopNotify disables notifications', { skip: isCI }, async (t) => {
   if (!needsCharacteristic(t)) return
-  characteristic.stopNotify()
-  t.pass()
+  const err = await new Promise((resolve) => characteristic.stopNotify(resolve))
+  t.absent(err)
 })
 
 hook('teardown', { skip: isCI }, async (t) => {
