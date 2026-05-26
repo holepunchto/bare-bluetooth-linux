@@ -85,7 +85,9 @@ test('startNotify enables notifications', { skip: isCI }, (t) => {
 
 test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) => {
   if (!needsCharacteristic(t)) return
+
   characteristic.startNotify()
+
   const data = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 5000)
     characteristic.once('data', (buf) => {
@@ -93,12 +95,8 @@ test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) =
       resolve(buf)
     })
   })
-  if (data) {
-    t.ok(data instanceof ArrayBuffer)
-  } else {
-    t.pass('no notification received within timeout')
-  }
-  characteristic.stopNotify()
+
+  t.ok(data instanceof ArrayBuffer)
 })
 
 test('stopNotify disables notifications', { skip: isCI }, (t) => {
