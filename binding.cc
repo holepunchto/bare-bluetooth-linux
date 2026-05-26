@@ -1179,17 +1179,18 @@ bare_bluetooth_linux_char_read(
     dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
   dbus_message_unref(msg);
 
+  std::vector<uint8_t> empty;
+
   if (!reply || dbus_error_is_set(&dbus_err)) {
     if (dbus_error_is_set(&dbus_err)) {
       err = js_throw_error(env, nullptr, dbus_err.message);
       assert(err == 0);
       dbus_error_free(&dbus_err);
     }
-    js_arraybuffer_t empty;
-    std::span<uint8_t> ev;
-    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    js_arraybuffer_t result;
+    err = js_create_arraybuffer(env, empty, result);
     assert(err == 0);
-    return empty;
+    return result;
   }
 
   DBusMessageIter reply_iter;
@@ -1197,11 +1198,10 @@ bare_bluetooth_linux_char_read(
 
   if (dbus_message_iter_get_arg_type(&reply_iter) != DBUS_TYPE_ARRAY) {
     dbus_message_unref(reply);
-    js_arraybuffer_t empty;
-    std::span<uint8_t> ev;
-    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    js_arraybuffer_t result;
+    err = js_create_arraybuffer(env, empty, result);
     assert(err == 0);
-    return empty;
+    return result;
   }
 
   DBusMessageIter array_iter;
