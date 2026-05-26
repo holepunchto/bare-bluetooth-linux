@@ -818,6 +818,7 @@ bare_bluetooth_linux__on_device_props_changed_signal(bare_bluetooth_linux_adapte
   if (has_changes) {
     js_call_threadsafe_function(adapter->tsfn_device_props_changed, event, js_threadsafe_function_nonblocking);
   } else {
+    // No tracked properties changed; free the event since it won't be consumed by the tsfn callback
     delete event;
   }
 }
