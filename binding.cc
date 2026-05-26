@@ -1209,11 +1209,8 @@ bare_bluetooth_linux_char_read(
   dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
 
   js_arraybuffer_t buffer;
-  std::span<uint8_t> view;
-  err = js_create_arraybuffer(env, len, view, buffer);
+  err = js_create_arraybuffer(env, std::span<const uint8_t>(data, len), buffer);
   assert(err == 0);
-
-  memcpy(view.data(), data, len);
 
   dbus_message_unref(reply);
   return buffer;
