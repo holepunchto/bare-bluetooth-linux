@@ -780,17 +780,13 @@ bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void
           DBusMessageIter array_iter;
           dbus_message_iter_recurse(&variant, &array_iter);
 
-          std::vector<uint8_t> bytes;
-          while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
-            uint8_t byte;
-            dbus_message_iter_get_basic(&array_iter, &byte);
-            bytes.push_back(byte);
-            dbus_message_iter_next(&array_iter);
-          }
+          const uint8_t *data;
+          int len;
+          dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
 
           auto *event = new bare_bluetooth_linux_char_value_event_t;
           event->path = obj_path;
-          event->value = std::move(bytes);
+          event->value.assign(data, data + len);
           js_call_threadsafe_function(adapter->tsfn_char_value, event, js_threadsafe_function_nonblocking);
         }
         break;
@@ -1207,20 +1203,16 @@ bare_bluetooth_linux_char_read(
   DBusMessageIter array_iter;
   dbus_message_iter_recurse(&reply_iter, &array_iter);
 
-  int len = dbus_message_iter_get_element_count(&reply_iter);
+  const uint8_t *data;
+  int len;
+  dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
 
   js_arraybuffer_t buffer;
   std::span<uint8_t> view;
   err = js_create_arraybuffer(env, len, view, buffer);
   assert(err == 0);
 
-  int i = 0;
-  while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
-    uint8_t byte;
-    dbus_message_iter_get_basic(&array_iter, &byte);
-    view[i++] = byte;
-    dbus_message_iter_next(&array_iter);
-  }
+  memcpy(view.data(), data, len);
 
   dbus_message_unref(reply);
   return buffer;
