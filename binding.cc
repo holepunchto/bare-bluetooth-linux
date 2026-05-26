@@ -466,11 +466,8 @@ bare_bluetooth_linux__on_char_value(
   assert(err == 0);
 
   js_arraybuffer_t buffer;
-  std::span<uint8_t> view;
-  err = js_create_arraybuffer(env, event->value.size(), view, buffer);
+  err = js_create_arraybuffer(env, event->value, buffer);
   assert(err == 0);
-
-  memcpy(view.data(), event->value.data(), event->value.size());
 
   js_call_function(env, function, js_receiver_t(receiver), event->path, buffer);
 
