@@ -40,10 +40,10 @@ test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
-  const connectErr = await new Promise((resolve) => device.connect(resolve))
-
-  if (connectErr) {
-    t.comment('connect error: ' + connectErr.message)
+  try {
+    await device.connect()
+  } catch (err) {
+    t.comment('connect error: ' + err.message)
     t.pass('connect failed (device may not support it)')
     return
   }
@@ -51,12 +51,11 @@ test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
   t.comment('connected: ' + device.connected)
   t.is(device.connected, true)
 
-  const disconnectErr = await new Promise((resolve) => device.disconnect(resolve))
-
-  if (disconnectErr) {
-    t.comment('disconnect error: ' + disconnectErr.message)
-  } else {
+  try {
+    await device.disconnect()
     t.comment('disconnected: ' + device.connected)
+  } catch (err) {
+    t.comment('disconnect error: ' + err.message)
   }
 })
 
@@ -74,14 +73,13 @@ test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
   t.comment('paired before: ' + device.paired)
 
-  const pairErr = await new Promise((resolve) => device.pair(resolve))
-
-  if (pairErr) {
-    t.comment('pair error: ' + pairErr.message)
-    t.pass('pair failed (device may not support it)')
-  } else {
+  try {
+    await device.pair()
     t.comment('paired after: ' + device.paired)
     t.is(device.paired, true)
+  } catch (err) {
+    t.comment('pair error: ' + err.message)
+    t.pass('pair failed (device may not support it)')
   }
 })
 

@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <uv.h>
+#include <vector>
 
 #define BLUEZ_BUS                "org.bluez"
 #define DBUS_PROP_IFACE          "org.freedesktop.DBus.Properties"
@@ -779,17 +780,13 @@ bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void
           DBusMessageIter array_iter;
           dbus_message_iter_recurse(&variant, &array_iter);
 
-          std::vector<uint8_t> bytes;
-          while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
-            uint8_t byte;
-            dbus_message_iter_get_basic(&array_iter, &byte);
-            bytes.push_back(byte);
-            dbus_message_iter_next(&array_iter);
-          }
+          const uint8_t *data;
+          int len;
+          dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
 
           auto *event = new bare_bluetooth_linux_char_value_event_t;
           event->path = obj_path;
-          event->value = std::move(bytes);
+          event->value.assign(data, data + len);
           js_call_threadsafe_function(adapter->tsfn_char_value, event, js_threadsafe_function_nonblocking);
         }
         break;
@@ -1097,10 +1094,11 @@ bare_bluetooth_linux_device_get_connected(
 }
 
 static void
-bare_bluetooth_linux__device_call_method(
+bare_bluetooth_linux__call_method_async(
   js_env_t *env,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   std::string path,
+  const char *iface,
   std::string method,
   int timeout,
   js_function_t<void, js_object_t> callback
@@ -1113,7 +1111,7 @@ bare_bluetooth_linux__device_call_method(
   err = js_create_reference(env, callback, call->cb);
   assert(err == 0);
 
-  DBusPendingCall *pending = dbus_call_void_method(adapter->signal_conn, path.c_str(), BLUEZ_DEVICE_IFACE, method.c_str(), timeout);
+  DBusPendingCall *pending = dbus_call_void_method(adapter->signal_conn, path.c_str(), iface, method.c_str(), timeout);
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
 }
@@ -1126,7 +1124,7 @@ bare_bluetooth_linux_device_connect(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, adapter, path, "Connect", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_DEVICE_IFACE, "Connect", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static void
@@ -1137,7 +1135,7 @@ bare_bluetooth_linux_device_disconnect(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, adapter, path, "Disconnect", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_DEVICE_IFACE, "Disconnect", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static void
@@ -1148,7 +1146,7 @@ bare_bluetooth_linux_device_pair(
   std::string path,
   js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__device_call_method(env, adapter, path, "Pair", DBUS_CONNECT_TIMEOUT, callback);
+  bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_DEVICE_IFACE, "Pair", DBUS_CONNECT_TIMEOUT, callback);
 }
 
 static bool
@@ -1178,17 +1176,18 @@ bare_bluetooth_linux_char_read(
     dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
   dbus_message_unref(msg);
 
+  std::vector<uint8_t> empty;
+
   if (!reply || dbus_error_is_set(&dbus_err)) {
     if (dbus_error_is_set(&dbus_err)) {
       err = js_throw_error(env, nullptr, dbus_err.message);
       assert(err == 0);
       dbus_error_free(&dbus_err);
     }
-    js_arraybuffer_t empty;
-    std::span<uint8_t> ev;
-    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    js_arraybuffer_t result;
+    err = js_create_arraybuffer(env, empty, result);
     assert(err == 0);
-    return empty;
+    return result;
   }
 
   DBusMessageIter reply_iter;
@@ -1196,30 +1195,24 @@ bare_bluetooth_linux_char_read(
 
   if (dbus_message_iter_get_arg_type(&reply_iter) != DBUS_TYPE_ARRAY) {
     dbus_message_unref(reply);
-    js_arraybuffer_t empty;
-    std::span<uint8_t> ev;
-    err = js_create_arraybuffer(env, (size_t) 0, ev, empty);
+    js_arraybuffer_t result;
+    err = js_create_arraybuffer(env, empty, result);
     assert(err == 0);
-    return empty;
+    return result;
   }
 
   DBusMessageIter array_iter;
   dbus_message_iter_recurse(&reply_iter, &array_iter);
 
-  int len = dbus_message_iter_get_element_count(&reply_iter);
+  const uint8_t *data;
+  int len;
+  dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
+
+  std::vector<uint8_t> bytes(data, data + len);
 
   js_arraybuffer_t buffer;
-  std::span<uint8_t> view;
-  err = js_create_arraybuffer(env, len, view, buffer);
+  err = js_create_arraybuffer(env, bytes, buffer);
   assert(err == 0);
-
-  int i = 0;
-  while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
-    uint8_t byte;
-    dbus_message_iter_get_basic(&array_iter, &byte);
-    view[i++] = byte;
-    dbus_message_iter_next(&array_iter);
-  }
 
   dbus_message_unref(reply);
   return buffer;
@@ -1268,24 +1261,16 @@ bare_bluetooth_linux_char_write(
 
 static void
 bare_bluetooth_linux_char_start_notify(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_function_t<void, js_object_t> callback
 ) {
-  auto error = dbus_call_void_method_sync(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "StartNotify");
-  if (error) {
-    int err = js_throw_error(env, nullptr, error->c_str());
-    assert(err == 0);
-  }
+  bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_GATT_CHAR_IFACE, "StartNotify", DBUS_TIMEOUT, callback);
 }
 
 static void
 bare_bluetooth_linux_char_stop_notify(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_function_t<void, js_object_t> callback
 ) {
-  auto error = dbus_call_void_method_sync(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "StopNotify");
-  if (error) {
-    int err = js_throw_error(env, nullptr, error->c_str());
-    assert(err == 0);
-  }
+  bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_GATT_CHAR_IFACE, "StopNotify", DBUS_TIMEOUT, callback);
 }
 
 static std::vector<std::string>

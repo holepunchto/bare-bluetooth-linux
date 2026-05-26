@@ -25,9 +25,10 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
 
   adapter.stopDiscovery()
 
-  const connectErr = await new Promise((resolve) => device.connect(resolve))
-  if (connectErr) {
-    t.comment('connect error: ' + connectErr.message)
+  try {
+    await device.connect()
+  } catch (err) {
+    t.comment('connect error: ' + err.message)
     return
   }
 
@@ -85,16 +86,16 @@ test('read returns a buffer', { skip: isCI }, (t) => {
   t.ok(data instanceof ArrayBuffer)
 })
 
-test('startNotify enables notifications', { skip: isCI }, (t) => {
+test('startNotify enables notifications', { skip: isCI }, async (t) => {
   if (!needsCharacteristic(t)) return
-  characteristic.startNotify()
+  await characteristic.startNotify()
   t.pass()
 })
 
 test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) => {
   if (!needsCharacteristic(t)) return
 
-  characteristic.startNotify()
+  await characteristic.startNotify()
 
   const data = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 5000)
@@ -107,13 +108,13 @@ test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) =
   t.ok(data instanceof ArrayBuffer)
 })
 
-test('stopNotify disables notifications', { skip: isCI }, (t) => {
+test('stopNotify disables notifications', { skip: isCI }, async (t) => {
   if (!needsCharacteristic(t)) return
-  characteristic.stopNotify()
+  await characteristic.stopNotify()
   t.pass()
 })
 
 hook('teardown', { skip: isCI }, async (t) => {
-  if (device) await new Promise((resolve) => device.disconnect(resolve))
+  if (device) await device.disconnect()
   if (adapter) adapter.destroy()
 })
