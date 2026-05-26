@@ -109,6 +109,40 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
   return result;
 }
 
+static std::vector<std::string>
+dbus_get_string_array_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
+
+  DBusError err;
+  dbus_error_init(&err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
+  dbus_message_unref(msg);
+
+  std::vector<std::string> result;
+  if (reply && !dbus_error_is_set(&err)) {
+    DBusMessageIter iter, variant, array;
+    dbus_message_iter_init(reply, &iter);
+    dbus_message_iter_recurse(&iter, &variant);
+    if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_ARRAY) {
+      dbus_message_iter_recurse(&variant, &array);
+      while (dbus_message_iter_get_arg_type(&array) == DBUS_TYPE_STRING) {
+        const char *val;
+        dbus_message_iter_get_basic(&array, &val);
+        result.push_back(val);
+        dbus_message_iter_next(&array);
+      }
+    }
+    dbus_message_unref(reply);
+  }
+  if (dbus_error_is_set(&err))
+    dbus_error_free(&err);
+
+  return result;
+}
+
 static std::optional<std::string>
 dbus_find_string_in_props(DBusMessageIter *props_iter, const char *target_prop) {
   while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
@@ -236,6 +270,11 @@ struct bare_bluetooth_linux_char_removed_event_t {
   service_path() const { return path.substr(0, path.rfind('/')); }
 };
 
+struct bare_bluetooth_linux_char_value_event_t {
+  std::string path;
+  std::vector<uint8_t> value;
+};
+
 struct bare_bluetooth_linux_tsfn_ctx_t {
   bare_bluetooth_linux_adapter_t *adapter;
 };
@@ -271,6 +310,9 @@ using bare_bluetooth_linux__on_char_added_fn =
 using bare_bluetooth_linux__on_char_removed_fn =
   js_function_t<void, js_receiver_t, std::string, std::string>;
 
+using bare_bluetooth_linux__on_char_value_fn =
+  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t>;
+
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
   DBusConnection *signal_conn;
@@ -287,6 +329,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_service_removed;
   js_threadsafe_function_t *tsfn_char_added;
   js_threadsafe_function_t *tsfn_char_removed;
+  js_threadsafe_function_t *tsfn_char_value;
 };
 
 static void
@@ -432,6 +475,35 @@ bare_bluetooth_linux__on_char_removed(
   assert(err == 0);
 
   js_call_function(env, function, js_receiver_t(receiver), event->path, event->service_path());
+
+  delete event;
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux__on_char_value(
+  js_env_t *env,
+  bare_bluetooth_linux__on_char_value_fn function,
+  bare_bluetooth_linux_tsfn_ctx_t *ctx,
+  bare_bluetooth_linux_char_value_event_t *event
+) {
+  int err;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_value_t *receiver;
+  err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
+  assert(err == 0);
+
+  js_arraybuffer_t buffer;
+  err = js_create_arraybuffer(env, event->value, buffer);
+  assert(err == 0);
+
+  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer);
 
   delete event;
 
@@ -672,6 +744,63 @@ bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void
     return DBUS_HANDLER_RESULT_HANDLED;
   }
 
+  if (dbus_message_is_signal(msg, DBUS_PROP_IFACE, "PropertiesChanged")) {
+    const char *obj_path = dbus_message_get_path(msg);
+    if (!obj_path || strncmp(obj_path, adapter->adapter_path.c_str(), adapter->adapter_path.length()) != 0)
+      return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+    DBusMessageIter args;
+    if (!dbus_message_iter_init(msg, &args))
+      return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+    const char *iface_name;
+    dbus_message_iter_get_basic(&args, &iface_name);
+    if (strcmp(iface_name, BLUEZ_GATT_CHAR_IFACE) != 0)
+      return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+    dbus_message_iter_next(&args);
+
+    DBusMessageIter props_iter;
+    dbus_message_iter_recurse(&args, &props_iter);
+
+    while (dbus_message_iter_get_arg_type(&props_iter) == DBUS_TYPE_DICT_ENTRY) {
+      DBusMessageIter entry;
+      dbus_message_iter_recurse(&props_iter, &entry);
+
+      const char *prop_name;
+      dbus_message_iter_get_basic(&entry, &prop_name);
+
+      if (strcmp(prop_name, "Value") == 0) {
+        dbus_message_iter_next(&entry);
+        DBusMessageIter variant;
+        dbus_message_iter_recurse(&entry, &variant);
+
+        if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_ARRAY) {
+          DBusMessageIter array_iter;
+          dbus_message_iter_recurse(&variant, &array_iter);
+
+          std::vector<uint8_t> bytes;
+          while (dbus_message_iter_get_arg_type(&array_iter) == DBUS_TYPE_BYTE) {
+            uint8_t byte;
+            dbus_message_iter_get_basic(&array_iter, &byte);
+            bytes.push_back(byte);
+            dbus_message_iter_next(&array_iter);
+          }
+
+          auto *event = new bare_bluetooth_linux_char_value_event_t;
+          event->path = obj_path;
+          event->value = std::move(bytes);
+          js_call_threadsafe_function(adapter->tsfn_char_value, event, js_threadsafe_function_nonblocking);
+        }
+        break;
+      }
+
+      dbus_message_iter_next(&props_iter);
+    }
+
+    return DBUS_HANDLER_RESULT_HANDLED;
+  }
+
   return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
@@ -709,6 +838,9 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_char_removed, js_threadsafe_function_release);
   assert(err == 0);
 
+  err = js_release_threadsafe_function(adapter->tsfn_char_value, js_threadsafe_function_release);
+  assert(err == 0);
+
   uv_close(reinterpret_cast<uv_handle_t *>(async), bare_bluetooth_linux__on_cleanup_close);
 }
 
@@ -734,7 +866,8 @@ bare_bluetooth_linux_adapter_init(
   bare_bluetooth_linux__on_service_added_fn on_service_added,
   bare_bluetooth_linux__on_service_removed_fn on_service_removed,
   bare_bluetooth_linux__on_char_added_fn on_char_added,
-  bare_bluetooth_linux__on_char_removed_fn on_char_removed
+  bare_bluetooth_linux__on_char_removed_fn on_char_removed,
+  bare_bluetooth_linux__on_char_value_fn on_char_value
 ) {
   dbus_threads_init_default();
 
@@ -747,7 +880,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
-  adapter->tsfn_count.store(7);
+  adapter->tsfn_count.store(8);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
@@ -783,6 +916,11 @@ bare_bluetooth_linux_adapter_init(
   dbus_bus_add_match(
     adapter->signal_conn,
     "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesRemoved'",
+    nullptr
+  );
+  dbus_bus_add_match(
+    adapter->signal_conn,
+    "type='signal',sender='org.bluez',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
     nullptr
   );
   dbus_connection_flush(adapter->signal_conn);
@@ -847,6 +985,14 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux__on_tsfn_finalize,
     bare_bluetooth_linux_tsfn_ctx_t,
     bare_bluetooth_linux_char_removed_event_t>(env, on_char_removed, 0, 1, char_removed_ctx, adapter->tsfn_char_removed);
+  assert(err == 0);
+
+  auto *char_value_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  err = js_create_threadsafe_function<
+    bare_bluetooth_linux__on_char_value,
+    bare_bluetooth_linux__on_tsfn_finalize,
+    bare_bluetooth_linux_tsfn_ctx_t,
+    bare_bluetooth_linux_char_value_event_t>(env, on_char_value, 0, 1, char_value_ctx, adapter->tsfn_char_value);
   assert(err == 0);
 
   uv_thread_create(&adapter->thread, bare_bluetooth_linux__dbus_thread, adapter);
@@ -1120,6 +1266,35 @@ bare_bluetooth_linux_char_write(
   }
 }
 
+static void
+bare_bluetooth_linux_char_start_notify(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  auto error = dbus_call_void_method_sync(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "StartNotify");
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
+}
+
+static void
+bare_bluetooth_linux_char_stop_notify(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  auto error = dbus_call_void_method_sync(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "StopNotify");
+  if (error) {
+    int err = js_throw_error(env, nullptr, error->c_str());
+    assert(err == 0);
+  }
+}
+
+static std::vector<std::string>
+bare_bluetooth_linux_char_get_flags(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_string_array_prop(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "Flags");
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -1150,6 +1325,9 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
 
   V("charRead", bare_bluetooth_linux_char_read)
   V("charWrite", bare_bluetooth_linux_char_write)
+  V("charStartNotify", bare_bluetooth_linux_char_start_notify)
+  V("charStopNotify", bare_bluetooth_linux_char_stop_notify)
+  V("charGetFlags", bare_bluetooth_linux_char_get_flags)
 
 #undef V
 
