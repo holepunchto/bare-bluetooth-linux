@@ -20,27 +20,6 @@
 #define DBUS_CONNECT_TIMEOUT     30000
 #define DBUS_POLL_INTERVAL       200
 
-template <int DBusType, typename DBusVal, typename T>
-static bool
-dbus_try_read_prop(const char *prop_name, const char *target, DBusMessageIter *variant, std::optional<T> &out) {
-  if (strcmp(prop_name, target) != 0) return false;
-  if (dbus_message_iter_get_arg_type(variant) != DBusType) return false;
-  DBusVal val;
-  dbus_message_iter_get_basic(variant, &val);
-  out = val;
-  return true;
-}
-
-static bool
-dbus_try_read_string_prop(const char *prop_name, const char *target, DBusMessageIter *variant, std::optional<std::string> &out) {
-  if (strcmp(prop_name, target) != 0) return false;
-  if (dbus_message_iter_get_arg_type(variant) != DBUS_TYPE_STRING) return false;
-  const char *val;
-  dbus_message_iter_get_basic(variant, &val);
-  out = val;
-  return true;
-}
-
 static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
@@ -804,13 +783,32 @@ bare_bluetooth_linux__on_device_props_changed_signal(bare_bluetooth_linux_adapte
     DBusMessageIter variant;
     dbus_message_iter_recurse(&entry, &variant);
 
-    has_changes =
-      dbus_try_read_prop<DBUS_TYPE_BOOLEAN, dbus_bool_t>(prop_name, "Connected", &variant, event->connected) ||
-      dbus_try_read_prop<DBUS_TYPE_BOOLEAN, dbus_bool_t>(prop_name, "Paired", &variant, event->paired) ||
-      dbus_try_read_prop<DBUS_TYPE_BOOLEAN, dbus_bool_t>(prop_name, "ServicesResolved", &variant, event->services_resolved) ||
-      dbus_try_read_prop<DBUS_TYPE_INT16, int16_t>(prop_name, "RSSI", &variant, event->rssi) ||
-      dbus_try_read_string_prop(prop_name, "Name", &variant, event->name) ||
-      has_changes;
+    if (strcmp(prop_name, "Connected") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->connected = val;
+      has_changes = true;
+    } else if (strcmp(prop_name, "Paired") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->paired = val;
+      has_changes = true;
+    } else if (strcmp(prop_name, "ServicesResolved") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->services_resolved = val;
+      has_changes = true;
+    } else if (strcmp(prop_name, "RSSI") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_INT16) {
+      int16_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->rssi = val;
+      has_changes = true;
+    } else if (strcmp(prop_name, "Name") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
+      const char *val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->name = val;
+      has_changes = true;
+    }
 
     dbus_message_iter_next(props_iter);
   }
