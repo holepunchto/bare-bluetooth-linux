@@ -109,6 +109,40 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
   return result;
 }
 
+static std::vector<std::string>
+dbus_get_string_array_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
+
+  DBusError err;
+  dbus_error_init(&err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
+  dbus_message_unref(msg);
+
+  std::vector<std::string> result;
+  if (reply && !dbus_error_is_set(&err)) {
+    DBusMessageIter iter, variant, array;
+    dbus_message_iter_init(reply, &iter);
+    dbus_message_iter_recurse(&iter, &variant);
+    if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_ARRAY) {
+      dbus_message_iter_recurse(&variant, &array);
+      while (dbus_message_iter_get_arg_type(&array) == DBUS_TYPE_STRING) {
+        const char *val;
+        dbus_message_iter_get_basic(&array, &val);
+        result.push_back(val);
+        dbus_message_iter_next(&array);
+      }
+    }
+    dbus_message_unref(reply);
+  }
+  if (dbus_error_is_set(&err))
+    dbus_error_free(&err);
+
+  return result;
+}
+
 static std::optional<std::string>
 dbus_find_string_in_props(DBusMessageIter *props_iter, const char *target_prop) {
   while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
@@ -1254,6 +1288,13 @@ bare_bluetooth_linux_char_stop_notify(
   }
 }
 
+static std::vector<std::string>
+bare_bluetooth_linux_char_get_flags(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_string_array_prop(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "Flags");
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -1286,6 +1327,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("charWrite", bare_bluetooth_linux_char_write)
   V("charStartNotify", bare_bluetooth_linux_char_start_notify)
   V("charStopNotify", bare_bluetooth_linux_char_stop_notify)
+  V("charGetFlags", bare_bluetooth_linux_char_get_flags)
 
 #undef V
 

@@ -44,8 +44,10 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   characteristic = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 10000)
     service.on('characteristic', (c) => {
-      clearTimeout(timeout)
-      resolve(c)
+      if (c.flags.includes('notify')) {
+        clearTimeout(timeout)
+        resolve(c)
+      }
     })
   })
 })
@@ -72,6 +74,11 @@ test('service tracks characteristics', { skip: isCI }, (t) => {
   t.ok(service.characteristics.size > 0)
 })
 
+test('characteristic has flags', { skip: isCI }, (t) => {
+  if (!needsCharacteristic(t)) return
+  t.ok(Array.isArray(characteristic.flags))
+})
+
 test('read returns a buffer', { skip: isCI }, (t) => {
   if (!needsCharacteristic(t)) return
   const data = characteristic.read()
@@ -80,7 +87,8 @@ test('read returns a buffer', { skip: isCI }, (t) => {
 
 test('startNotify enables notifications', { skip: isCI }, (t) => {
   if (!needsCharacteristic(t)) return
-  t.execution(() => characteristic.startNotify())
+  characteristic.startNotify()
+  t.pass()
 })
 
 test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) => {
@@ -101,7 +109,8 @@ test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) =
 
 test('stopNotify disables notifications', { skip: isCI }, (t) => {
   if (!needsCharacteristic(t)) return
-  t.execution(() => characteristic.stopNotify())
+  characteristic.stopNotify()
+  t.pass()
 })
 
 hook('teardown', { skip: isCI }, async (t) => {
