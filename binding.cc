@@ -1390,9 +1390,15 @@ bare_bluetooth_linux_char_read(
 
 static void
 bare_bluetooth_linux_char_write(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t<uint8_t> value
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t<uint8_t> value, js_function_t<void, js_object_t> callback
 ) {
+  auto *call = new bare_bluetooth_linux_async_call_t();
+  call->env = env;
+  call->adapter = &*adapter;
+
   int err;
+  err = js_create_reference(env, callback, call->cb);
+  assert(err == 0);
 
   uint8_t *data;
   size_t len;
@@ -1414,19 +1420,11 @@ bare_bluetooth_linux_char_write(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusError dbus_err;
-  dbus_error_init(&dbus_err);
-  DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  DBusPendingCall *pending;
+  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
   dbus_message_unref(msg);
 
-  if (reply) dbus_message_unref(reply);
-
-  if (dbus_error_is_set(&dbus_err)) {
-    err = js_throw_error(env, nullptr, dbus_err.message);
-    assert(err == 0);
-    dbus_error_free(&dbus_err);
-  }
+  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
 }
 
 static void
