@@ -559,19 +559,21 @@ bare_bluetooth_linux__on_device_props_changed(
   assert(err == 0);
 }
 
+#define DBUS_EXTRACT_ERROR(reply, target) \
+  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) { \
+    DBusError _err; \
+    dbus_error_init(&_err); \
+    dbus_set_error_from_message(&_err, reply); \
+    (target) = std::string(_err.message); \
+    dbus_error_free(&_err); \
+  }
+
 static void
 bare_bluetooth_linux__on_pending_call_notify(DBusPendingCall *pending, void *data) {
   auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
 
   DBusMessage *reply = dbus_pending_call_steal_reply(pending);
-
-  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
-    DBusError err;
-    dbus_error_init(&err);
-    dbus_set_error_from_message(&err, reply);
-    call->error = std::string(err.message);
-    dbus_error_free(&err);
-  }
+  DBUS_EXTRACT_ERROR(reply, call->error);
 
   dbus_message_unref(reply);
   dbus_pending_call_unref(pending);
@@ -620,14 +622,9 @@ bare_bluetooth_linux__on_pending_read_call_notify(DBusPendingCall *pending, void
   auto *call = static_cast<bare_bluetooth_linux_async_read_call_t *>(data);
 
   DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  DBUS_EXTRACT_ERROR(reply, call->error);
 
-  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
-    DBusError err;
-    dbus_error_init(&err);
-    dbus_set_error_from_message(&err, reply);
-    call->error = std::string(err.message);
-    dbus_error_free(&err);
-  } else {
+  if (!call->error) {
     DBusMessageIter reply_iter;
     dbus_message_iter_init(reply, &reply_iter);
 
