@@ -196,6 +196,44 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
     dbus_error_free(&err);
 }
 
+static void
+dbus_dict_append_string(DBusMessageIter *dict, const char *key, const char *val) {
+  DBusMessageIter entry, variant;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
+  dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
+static void
+dbus_dict_append_int16(DBusMessageIter *dict, const char *key, int16_t val) {
+  DBusMessageIter entry, variant;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "n", &variant);
+  dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT16, &val);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
+static void
+dbus_dict_append_string_array(DBusMessageIter *dict, const char *key, const std::vector<std::string> &vals) {
+  DBusMessageIter entry, variant, array;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "as", &variant);
+  dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &array);
+  for (const auto &s : vals) {
+    const char *val = s.c_str();
+    dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &val);
+  }
+  dbus_message_iter_close_container(&variant, &array);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
 static DBusPendingCall *
 dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
@@ -1242,6 +1280,38 @@ bare_bluetooth_linux_adapter_get_address(
 }
 
 static void
+bare_bluetooth_linux_adapter_set_discovery_filter(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::vector<std::string> uuids, std::optional<int32_t> rssi, std::optional<std::string> transport
+) {
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "SetDiscoveryFilter");
+
+  DBusMessageIter iter, dict;
+  dbus_message_iter_init_append(msg, &iter);
+  dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
+
+  if (!uuids.empty()) dbus_dict_append_string_array(&dict, "UUIDs", uuids);
+  if (rssi) dbus_dict_append_int16(&dict, "RSSI", static_cast<int16_t>(*rssi));
+  if (transport) dbus_dict_append_string(&dict, "Transport", transport->c_str());
+
+  dbus_message_iter_close_container(&iter, &dict);
+
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  dbus_message_unref(msg);
+
+  if (reply) dbus_message_unref(reply);
+
+  if (dbus_error_is_set(&dbus_err)) {
+    int err = js_throw_error(env, nullptr, dbus_err.message);
+    assert(err == 0);
+    dbus_error_free(&dbus_err);
+  }
+}
+
+static void
 bare_bluetooth_linux_adapter_start_discovery(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
 ) {
@@ -1419,17 +1489,7 @@ bare_bluetooth_linux_char_write(
 
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
 
-  if (type) {
-    DBusMessageIter entry, variant;
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
-    const char *key = "type";
-    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
-    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
-    const char *val = type->c_str();
-    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
-    dbus_message_iter_close_container(&entry, &variant);
-    dbus_message_iter_close_container(&dict, &entry);
-  }
+  if (type) dbus_dict_append_string(&dict, "type", type->c_str());
 
   dbus_message_iter_close_container(&iter, &dict);
 
@@ -1475,6 +1535,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("adapterSetPowered", bare_bluetooth_linux_adapter_set_powered)
   V("adapterGetDiscovering", bare_bluetooth_linux_adapter_get_discovering)
   V("adapterGetAddress", bare_bluetooth_linux_adapter_get_address)
+  V("adapterSetDiscoveryFilter", bare_bluetooth_linux_adapter_set_discovery_filter)
   V("adapterStartDiscovery", bare_bluetooth_linux_adapter_start_discovery)
   V("adapterStopDiscovery", bare_bluetooth_linux_adapter_stop_discovery)
 

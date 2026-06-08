@@ -70,6 +70,21 @@ test('startDiscovery', { skip: isCI }, (t) => {
   t.execution(() => adapter.startDiscovery())
 })
 
+test('setDiscoveryFilter with uuids', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  t.execution(() => adapter.setDiscoveryFilter({ uuids: ['0000180a-0000-1000-8000-00805f9b34fb'] }))
+})
+
+test('setDiscoveryFilter with rssi', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  t.execution(() => adapter.setDiscoveryFilter({ rssi: -70 }))
+})
+
+test('setDiscoveryFilter with transport', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+  t.execution(() => adapter.setDiscoveryFilter({ transport: 'le' }))
+})
+
 test('stopDiscovery', { skip: isCI }, (t) => {
   using adapter = new Adapter()
   adapter.startDiscovery()
