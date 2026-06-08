@@ -296,6 +296,14 @@ struct bare_bluetooth_linux_async_call_t {
   std::optional<std::string> error;
 };
 
+struct bare_bluetooth_linux_async_read_call_t {
+  js_env_t *env;
+  js_persistent_t<js_function_t<void, js_object_t, js_arraybuffer_t>> cb;
+  bare_bluetooth_linux_adapter_t *adapter;
+  std::optional<std::string> error;
+  std::vector<uint8_t> data;
+};
+
 static void
 bare_bluetooth_linux__noop(js_env_t *env, js_receiver_t) {}
 
@@ -338,6 +346,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_device_added;
   js_threadsafe_function_t *tsfn_device_removed;
   js_threadsafe_function_t *tsfn_method_reply;
+  js_threadsafe_function_t *tsfn_read_reply;
   js_threadsafe_function_t *tsfn_service_added;
   js_threadsafe_function_t *tsfn_service_removed;
   js_threadsafe_function_t *tsfn_char_added;
@@ -598,6 +607,79 @@ bare_bluetooth_linux__on_method_reply(
   }
 
   err = js_call_function_with_checkpoint(env, callback, error);
+  assert(err != js_pending_exception);
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+
+  delete call;
+}
+
+static void
+bare_bluetooth_linux__on_pending_read_call_notify(DBusPendingCall *pending, void *data) {
+  auto *call = static_cast<bare_bluetooth_linux_async_read_call_t *>(data);
+
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+
+  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
+    DBusError err;
+    dbus_error_init(&err);
+    dbus_set_error_from_message(&err, reply);
+    call->error = std::string(err.message);
+    dbus_error_free(&err);
+  } else {
+    DBusMessageIter reply_iter;
+    dbus_message_iter_init(reply, &reply_iter);
+
+    if (dbus_message_iter_get_arg_type(&reply_iter) == DBUS_TYPE_ARRAY) {
+      DBusMessageIter array_iter;
+      dbus_message_iter_recurse(&reply_iter, &array_iter);
+
+      const uint8_t *bytes;
+      int len;
+      dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+      call->data.assign(bytes, bytes + len);
+    }
+  }
+
+  dbus_message_unref(reply);
+  dbus_pending_call_unref(pending);
+
+  js_call_threadsafe_function(call->adapter->tsfn_read_reply, call, js_threadsafe_function_nonblocking);
+}
+
+static void
+bare_bluetooth_linux__on_read_reply(
+  js_env_t *env,
+  bare_bluetooth_linux__noop_fn function,
+  bare_bluetooth_linux_tsfn_ctx_t *ctx,
+  bare_bluetooth_linux_async_read_call_t *call
+) {
+  int err;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_function_t<void, js_object_t, js_arraybuffer_t> callback;
+  err = js_get_reference_value(env, call->cb, callback);
+  assert(err == 0);
+
+  js_object_t error;
+
+  if (call->error) {
+    err = js_create_error(env, call->error->c_str(), error);
+    assert(err == 0);
+  } else {
+    err = js_get_null(env, error);
+    assert(err == 0);
+  }
+
+  js_arraybuffer_t buffer;
+  err = js_create_arraybuffer(env, call->data, buffer);
+  assert(err == 0);
+
+  err = js_call_function_with_checkpoint(env, callback, error, buffer);
   assert(err != js_pending_exception);
 
   err = js_close_handle_scope(env, scope);
@@ -926,6 +1008,9 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_method_reply, js_threadsafe_function_release);
   assert(err == 0);
 
+  err = js_release_threadsafe_function(adapter->tsfn_read_reply, js_threadsafe_function_release);
+  assert(err == 0);
+
   err = js_release_threadsafe_function(adapter->tsfn_service_added, js_threadsafe_function_release);
   assert(err == 0);
 
@@ -984,7 +1069,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
-  adapter->tsfn_count.store(9);
+  adapter->tsfn_count.store(10);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
@@ -1057,6 +1142,14 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux__on_tsfn_finalize,
     bare_bluetooth_linux_tsfn_ctx_t,
     bare_bluetooth_linux_async_call_t>(env, noop, 0, 1, reply_ctx, adapter->tsfn_method_reply);
+  assert(err == 0);
+
+  auto *read_reply_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  err = js_create_threadsafe_function<
+    bare_bluetooth_linux__on_read_reply,
+    bare_bluetooth_linux__on_tsfn_finalize,
+    bare_bluetooth_linux_tsfn_ctx_t,
+    bare_bluetooth_linux_async_read_call_t>(env, noop, 0, 1, read_reply_ctx, adapter->tsfn_read_reply);
   assert(err == 0);
 
   auto *service_added_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
@@ -1271,11 +1364,17 @@ bare_bluetooth_linux_service_is_primary(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_GATT_SERVICE_IFACE, "Primary");
 }
 
-static js_arraybuffer_t
+static void
 bare_bluetooth_linux_char_read(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_function_t<void, js_object_t, js_arraybuffer_t> callback
 ) {
+  auto *call = new bare_bluetooth_linux_async_read_call_t();
+  call->env = env;
+  call->adapter = &*adapter;
+
   int err;
+  err = js_create_reference(env, callback, call->cb);
+  assert(err == 0);
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "ReadValue");
@@ -1285,52 +1384,11 @@ bare_bluetooth_linux_char_read(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusError dbus_err;
-  dbus_error_init(&dbus_err);
-  DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  DBusPendingCall *pending;
+  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
   dbus_message_unref(msg);
 
-  std::vector<uint8_t> empty;
-
-  if (!reply || dbus_error_is_set(&dbus_err)) {
-    if (dbus_error_is_set(&dbus_err)) {
-      err = js_throw_error(env, nullptr, dbus_err.message);
-      assert(err == 0);
-      dbus_error_free(&dbus_err);
-    }
-    js_arraybuffer_t result;
-    err = js_create_arraybuffer(env, empty, result);
-    assert(err == 0);
-    return result;
-  }
-
-  DBusMessageIter reply_iter;
-  dbus_message_iter_init(reply, &reply_iter);
-
-  if (dbus_message_iter_get_arg_type(&reply_iter) != DBUS_TYPE_ARRAY) {
-    dbus_message_unref(reply);
-    js_arraybuffer_t result;
-    err = js_create_arraybuffer(env, empty, result);
-    assert(err == 0);
-    return result;
-  }
-
-  DBusMessageIter array_iter;
-  dbus_message_iter_recurse(&reply_iter, &array_iter);
-
-  const uint8_t *data;
-  int len;
-  dbus_message_iter_get_fixed_array(&array_iter, &data, &len);
-
-  std::vector<uint8_t> bytes(data, data + len);
-
-  js_arraybuffer_t buffer;
-  err = js_create_arraybuffer(env, bytes, buffer);
-  assert(err == 0);
-
-  dbus_message_unref(reply);
-  return buffer;
+  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_read_call_notify, call, NULL);
 }
 
 static void
