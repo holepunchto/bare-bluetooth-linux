@@ -1390,7 +1390,7 @@ bare_bluetooth_linux_char_read(
 
 static void
 bare_bluetooth_linux_char_write(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t<uint8_t> value, js_function_t<void, js_object_t> callback
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_typedarray_t<uint8_t> value, std::optional<std::string> type, js_function_t<void, js_object_t> callback
 ) {
   auto *call = new bare_bluetooth_linux_async_call_t();
   call->env = env;
@@ -1418,6 +1418,19 @@ bare_bluetooth_linux_char_write(
   dbus_message_iter_close_container(&iter, &array);
 
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
+
+  if (type) {
+    DBusMessageIter entry, variant;
+    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+    const char *key = "type";
+    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
+    const char *val = type->c_str();
+    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
+    dbus_message_iter_close_container(&entry, &variant);
+    dbus_message_iter_close_container(&dict, &entry);
+  }
+
   dbus_message_iter_close_container(&iter, &dict);
 
   DBusPendingCall *pending;
