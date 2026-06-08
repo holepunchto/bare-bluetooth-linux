@@ -5,12 +5,12 @@ const { isCI } = require('./helpers')
 let adapter
 let device
 let service
-let characteristic
+let notifiableCharacteristic
 let writableCharacteristic
 
-function needsCharacteristic(t) {
-  if (!characteristic) {
-    t.pass('no characteristic available')
+function needsNotifiableCharacteristic(t) {
+  if (!notifiableCharacteristic) {
+    t.pass('no notifiable characteristic available')
     return false
   }
   return true
@@ -64,25 +64,25 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
     })
   })
 
-  characteristic = chars.notify
+  notifiableCharacteristic = chars.notify
   writableCharacteristic = chars.write
 })
 
 test('characteristic is an instance of Characteristic', { skip: isCI }, (t) => {
-  if (!needsCharacteristic(t)) return
-  t.ok(characteristic instanceof Characteristic)
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(notifiableCharacteristic instanceof Characteristic)
 })
 
 test('characteristic has uuid', { skip: isCI }, (t) => {
-  if (!needsCharacteristic(t)) return
-  t.ok(typeof characteristic.uuid === 'string')
-  t.ok(characteristic.uuid.length > 0)
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(typeof notifiableCharacteristic.uuid === 'string')
+  t.ok(notifiableCharacteristic.uuid.length > 0)
 })
 
 test('characteristic has path', { skip: isCI }, (t) => {
-  if (!needsCharacteristic(t)) return
-  t.ok(typeof characteristic.path === 'string')
-  t.ok(characteristic.path.length > 0)
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(typeof notifiableCharacteristic.path === 'string')
+  t.ok(notifiableCharacteristic.path.length > 0)
 })
 
 test('service tracks characteristics', { skip: isCI }, (t) => {
@@ -91,30 +91,30 @@ test('service tracks characteristics', { skip: isCI }, (t) => {
 })
 
 test('characteristic has flags', { skip: isCI }, (t) => {
-  if (!needsCharacteristic(t)) return
-  t.ok(Array.isArray(characteristic.flags))
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(Array.isArray(notifiableCharacteristic.flags))
 })
 
 test('read returns a buffer', { skip: isCI }, async (t) => {
-  if (!needsCharacteristic(t)) return
-  const data = await characteristic.read()
+  if (!needsNotifiableCharacteristic(t)) return
+  const data = await notifiableCharacteristic.read()
   t.ok(data instanceof ArrayBuffer)
 })
 
 test('startNotify enables notifications', { skip: isCI }, async (t) => {
-  if (!needsCharacteristic(t)) return
-  await characteristic.startNotify()
+  if (!needsNotifiableCharacteristic(t)) return
+  await notifiableCharacteristic.startNotify()
   t.pass()
 })
 
 test('data event receives a buffer', { skip: isCI, timeout: 10000 }, async (t) => {
-  if (!needsCharacteristic(t)) return
+  if (!needsNotifiableCharacteristic(t)) return
 
-  await characteristic.startNotify()
+  await notifiableCharacteristic.startNotify()
 
   const data = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 5000)
-    characteristic.once('data', (buf) => {
+    notifiableCharacteristic.once('data', (buf) => {
       clearTimeout(timeout)
       resolve(buf)
     })
@@ -142,8 +142,8 @@ test('write with type command resolves', { skip: isCI }, async (t) => {
 })
 
 test('stopNotify disables notifications', { skip: isCI }, async (t) => {
-  if (!needsCharacteristic(t)) return
-  await characteristic.stopNotify()
+  if (!needsNotifiableCharacteristic(t)) return
+  await notifiableCharacteristic.stopNotify()
   t.pass()
 })
 
