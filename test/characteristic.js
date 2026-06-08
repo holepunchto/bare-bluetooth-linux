@@ -80,9 +80,9 @@ test('characteristic has flags', { skip: isCI }, (t) => {
   t.ok(Array.isArray(characteristic.flags))
 })
 
-test('read returns a buffer', { skip: isCI }, (t) => {
+test('read returns a buffer', { skip: isCI }, async (t) => {
   if (!needsCharacteristic(t)) return
-  const data = characteristic.read()
+  const data = await characteristic.read()
   t.ok(data instanceof ArrayBuffer)
 })
 
