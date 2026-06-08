@@ -196,6 +196,44 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
     dbus_error_free(&err);
 }
 
+static void
+dbus_dict_append_string(DBusMessageIter *dict, const char *key, const char *val) {
+  DBusMessageIter entry, variant;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
+  dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
+static void
+dbus_dict_append_int16(DBusMessageIter *dict, const char *key, int16_t val) {
+  DBusMessageIter entry, variant;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "n", &variant);
+  dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT16, &val);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
+static void
+dbus_dict_append_string_array(DBusMessageIter *dict, const char *key, const std::vector<std::string> &vals) {
+  DBusMessageIter entry, variant, array;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "as", &variant);
+  dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &array);
+  for (const auto &s : vals) {
+    const char *val = s.c_str();
+    dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &val);
+  }
+  dbus_message_iter_close_container(&variant, &array);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
 static DBusPendingCall *
 dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
@@ -1252,45 +1290,9 @@ bare_bluetooth_linux_adapter_set_discovery_filter(
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
 
-  if (!uuids.empty()) {
-    DBusMessageIter entry, variant, array;
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
-    const char *key = "UUIDs";
-    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
-    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "as", &variant);
-    dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &array);
-    for (const auto &uuid : uuids) {
-      const char *val = uuid.c_str();
-      dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &val);
-    }
-    dbus_message_iter_close_container(&variant, &array);
-    dbus_message_iter_close_container(&entry, &variant);
-    dbus_message_iter_close_container(&dict, &entry);
-  }
-
-  if (rssi) {
-    DBusMessageIter entry, variant;
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
-    const char *key = "RSSI";
-    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
-    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "n", &variant);
-    int16_t val = static_cast<int16_t>(*rssi);
-    dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT16, &val);
-    dbus_message_iter_close_container(&entry, &variant);
-    dbus_message_iter_close_container(&dict, &entry);
-  }
-
-  if (transport) {
-    DBusMessageIter entry, variant;
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
-    const char *key = "Transport";
-    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
-    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
-    const char *val = transport->c_str();
-    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
-    dbus_message_iter_close_container(&entry, &variant);
-    dbus_message_iter_close_container(&dict, &entry);
-  }
+  if (!uuids.empty()) dbus_dict_append_string_array(&dict, "UUIDs", uuids);
+  if (rssi) dbus_dict_append_int16(&dict, "RSSI", static_cast<int16_t>(*rssi));
+  if (transport) dbus_dict_append_string(&dict, "Transport", transport->c_str());
 
   dbus_message_iter_close_container(&iter, &dict);
 
@@ -1487,17 +1489,7 @@ bare_bluetooth_linux_char_write(
 
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
 
-  if (type) {
-    DBusMessageIter entry, variant;
-    dbus_message_iter_open_container(&dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
-    const char *key = "type";
-    dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
-    dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "s", &variant);
-    const char *val = type->c_str();
-    dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &val);
-    dbus_message_iter_close_container(&entry, &variant);
-    dbus_message_iter_close_container(&dict, &entry);
-  }
+  if (type) dbus_dict_append_string(&dict, "type", type->c_str());
 
   dbus_message_iter_close_container(&iter, &dict);
 
