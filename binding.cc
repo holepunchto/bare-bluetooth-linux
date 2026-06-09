@@ -6,6 +6,7 @@
 #include <jstl.h>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <uv.h>
 #include <vector>
 
@@ -80,8 +81,20 @@ dbus_get_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
   return result;
 }
 
-static std::optional<int32_t>
-dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
+template <typename T>
+static constexpr int
+dbus_type_code() {
+  if constexpr (std::is_same_v<T, int16_t>) return DBUS_TYPE_INT16;
+  else if constexpr (std::is_same_v<T, uint16_t>) return DBUS_TYPE_UINT16;
+  else if constexpr (std::is_same_v<T, int32_t>) return DBUS_TYPE_INT32;
+  else if constexpr (std::is_same_v<T, uint32_t>) return DBUS_TYPE_UINT32;
+  else if constexpr (std::is_same_v<T, int64_t>) return DBUS_TYPE_INT64;
+  else if constexpr (std::is_same_v<T, uint64_t>) return DBUS_TYPE_UINT64;
+}
+
+template <typename T>
+static std::optional<T>
+dbus_get_numeric_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
@@ -92,13 +105,13 @@ dbus_get_int16_prop(DBusConnection *conn, const char *path, const char *iface, c
     dbus_connection_send_with_reply_and_block(conn, msg, DBUS_TIMEOUT, &err);
   dbus_message_unref(msg);
 
-  std::optional<int32_t> result;
+  std::optional<T> result;
   if (reply && !dbus_error_is_set(&err)) {
     DBusMessageIter iter, variant;
     dbus_message_iter_init(reply, &iter);
     dbus_message_iter_recurse(&iter, &variant);
-    if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_INT16) {
-      int16_t val;
+    if (dbus_message_iter_get_arg_type(&variant) == dbus_type_code<T>()) {
+      T val;
       dbus_message_iter_get_basic(&variant, &val);
       result = val;
     }
@@ -1351,7 +1364,7 @@ static std::optional<int32_t>
 bare_bluetooth_linux_device_get_rssi(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
-  return dbus_get_int16_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "RSSI");
+  return dbus_get_numeric_prop<int16_t>(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "RSSI");
 }
 
 static bool
@@ -1521,6 +1534,13 @@ bare_bluetooth_linux_char_get_flags(
   return dbus_get_string_array_prop(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "Flags");
 }
 
+static std::optional<int32_t>
+bare_bluetooth_linux_char_get_mtu(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_numeric_prop<uint16_t>(adapter->conn, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "MTU");
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -1555,6 +1575,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("charStartNotify", bare_bluetooth_linux_char_start_notify)
   V("charStopNotify", bare_bluetooth_linux_char_stop_notify)
   V("charGetFlags", bare_bluetooth_linux_char_get_flags)
+  V("charGetMTU", bare_bluetooth_linux_char_get_mtu)
 
 #undef V
 
