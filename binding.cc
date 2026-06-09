@@ -1441,16 +1441,18 @@ bare_bluetooth_linux_device_get_manufacturer_data(
         int len;
         dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
 
-        js_value_t *buffer;
-        void *data;
-        err = js_create_arraybuffer(env, len, &data, &buffer);
-        assert(err == 0);
-        memcpy(data, bytes, len);
+        if (len > 0) {
+          js_value_t *buffer;
+          void *data;
+          err = js_create_arraybuffer(env, len, &data, &buffer);
+          assert(err == 0);
+          memcpy(data, bytes, len);
 
-        char key[6];
-        snprintf(key, sizeof(key), "%u", company_id);
-        err = js_set_named_property(env, result, key, buffer);
-        assert(err == 0);
+          char key[16];
+          snprintf(key, sizeof(key), "%u", company_id);
+          err = js_set_named_property(env, result, key, buffer);
+          assert(err == 0);
+        }
       }
 
       dbus_message_iter_next(&dict);
@@ -1514,14 +1516,16 @@ bare_bluetooth_linux_device_get_service_data(
         int len;
         dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
 
-        js_value_t *buffer;
-        void *data;
-        err = js_create_arraybuffer(env, len, &data, &buffer);
-        assert(err == 0);
-        memcpy(data, bytes, len);
+        if (len > 0) {
+          js_value_t *buffer;
+          void *data;
+          err = js_create_arraybuffer(env, len, &data, &buffer);
+          assert(err == 0);
+          memcpy(data, bytes, len);
 
-        err = js_set_named_property(env, result, uuid, buffer);
-        assert(err == 0);
+          err = js_set_named_property(env, result, uuid, buffer);
+          assert(err == 0);
+        }
       }
 
       dbus_message_iter_next(&dict);
