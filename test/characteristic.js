@@ -95,6 +95,12 @@ test('characteristic has flags', { skip: isCI }, (t) => {
   t.ok(Array.isArray(notifiableCharacteristic.flags))
 })
 
+test('mtu is a number', { skip: isCI }, (t) => {
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(typeof notifiableCharacteristic.mtu === 'number')
+  t.ok(notifiableCharacteristic.mtu > 0)
+})
+
 test('read returns a buffer', { skip: isCI }, async (t) => {
   if (!needsNotifiableCharacteristic(t)) return
   const data = await notifiableCharacteristic.read()
