@@ -1388,15 +1388,11 @@ bare_bluetooth_linux_device_get_uuids(
   return dbus_get_string_array_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "UUIDs");
 }
 
-static js_value_t *
+static void
 bare_bluetooth_linux_device_get_manufacturer_data(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_object_t result
 ) {
   int err;
-
-  js_value_t *result;
-  err = js_create_object(env, &result);
-  assert(err == 0);
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
@@ -1412,7 +1408,7 @@ bare_bluetooth_linux_device_get_manufacturer_data(
 
   if (!reply || dbus_error_is_set(&dbus_err)) {
     if (dbus_error_is_set(&dbus_err)) dbus_error_free(&dbus_err);
-    return result;
+    return;
   }
 
   DBusMessageIter iter, variant, dict;
@@ -1450,7 +1446,7 @@ bare_bluetooth_linux_device_get_manufacturer_data(
 
           char key[16];
           snprintf(key, sizeof(key), "%u", company_id);
-          err = js_set_named_property(env, result, key, buffer);
+          err = js_set_named_property(env, static_cast<js_value_t *>(result), key, buffer);
           assert(err == 0);
         }
       }
@@ -1460,18 +1456,13 @@ bare_bluetooth_linux_device_get_manufacturer_data(
   }
 
   dbus_message_unref(reply);
-  return result;
 }
 
-static js_value_t *
+static void
 bare_bluetooth_linux_device_get_service_data(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_object_t result
 ) {
   int err;
-
-  js_value_t *result;
-  err = js_create_object(env, &result);
-  assert(err == 0);
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
@@ -1487,7 +1478,7 @@ bare_bluetooth_linux_device_get_service_data(
 
   if (!reply || dbus_error_is_set(&dbus_err)) {
     if (dbus_error_is_set(&dbus_err)) dbus_error_free(&dbus_err);
-    return result;
+    return;
   }
 
   DBusMessageIter iter, variant, dict;
@@ -1523,7 +1514,7 @@ bare_bluetooth_linux_device_get_service_data(
           assert(err == 0);
           memcpy(data, bytes, len);
 
-          err = js_set_named_property(env, result, uuid, buffer);
+          err = js_set_named_property(env, static_cast<js_value_t *>(result), uuid, buffer);
           assert(err == 0);
         }
       }
@@ -1533,7 +1524,6 @@ bare_bluetooth_linux_device_get_service_data(
   }
 
   dbus_message_unref(reply);
-  return result;
 }
 
 static void
