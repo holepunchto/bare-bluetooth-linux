@@ -2105,8 +2105,8 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("descWrite", bare_bluetooth_linux_desc_write)
   V("descGetFlags", bare_bluetooth_linux_desc_get_flags)
 
-  V("advRegister", bare_bluetooth_linux_advertisement_register)
-  V("advUnregister", bare_bluetooth_linux_advertisement_unregister)
+  V("advertisementRegister", bare_bluetooth_linux_advertisement_register)
+  V("advertisementUnregister", bare_bluetooth_linux_advertisement_unregister)
 
 #undef V
 
