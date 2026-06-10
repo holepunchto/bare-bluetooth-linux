@@ -41,7 +41,10 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
     })
   })
 
-  if (!service) return
+  if (!service) {
+    t.comment('no service discovered')
+    return
+  }
 
   characteristic = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 10000)
@@ -51,7 +54,10 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
     })
   })
 
-  if (!characteristic) return
+  if (!characteristic) {
+    t.comment('no characteristic discovered')
+    return
+  }
 
   descriptor = await new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), 10000)
