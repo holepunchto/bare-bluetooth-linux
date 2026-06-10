@@ -25,6 +25,9 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(device.rssi === undefined || typeof device.rssi === 'number')
   t.ok(typeof device.paired === 'boolean')
   t.ok(typeof device.connected === 'boolean')
+  t.ok(Array.isArray(device.uuids))
+  t.ok(typeof device.manufacturerData === 'object')
+  t.ok(typeof device.serviceData === 'object')
 })
 
 test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {

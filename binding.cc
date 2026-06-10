@@ -1381,6 +1381,151 @@ bare_bluetooth_linux_device_get_connected(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connected");
 }
 
+static std::vector<std::string>
+bare_bluetooth_linux_device_get_uuids(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_string_array_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "UUIDs");
+}
+
+static void
+bare_bluetooth_linux_device_get_manufacturer_data(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_object_t result
+) {
+  int err;
+
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
+  const char *iface = BLUEZ_DEVICE_IFACE;
+  const char *prop = "ManufacturerData";
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
+
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  dbus_message_unref(msg);
+
+  if (!reply || dbus_error_is_set(&dbus_err)) {
+    if (dbus_error_is_set(&dbus_err)) dbus_error_free(&dbus_err);
+    return;
+  }
+
+  DBusMessageIter iter, variant, dict;
+  dbus_message_iter_init(reply, &iter);
+  dbus_message_iter_recurse(&iter, &variant);
+
+  if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_ARRAY) {
+    dbus_message_iter_recurse(&variant, &dict);
+
+    while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
+      DBusMessageIter entry;
+      dbus_message_iter_recurse(&dict, &entry);
+
+      uint16_t company_id;
+      dbus_message_iter_get_basic(&entry, &company_id);
+      dbus_message_iter_next(&entry);
+
+      DBusMessageIter val_variant;
+      dbus_message_iter_recurse(&entry, &val_variant);
+
+      if (dbus_message_iter_get_arg_type(&val_variant) == DBUS_TYPE_ARRAY) {
+        DBusMessageIter array_iter;
+        dbus_message_iter_recurse(&val_variant, &array_iter);
+
+        const uint8_t *bytes;
+        int len;
+        dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+
+        if (len > 0) {
+          js_value_t *buffer;
+          void *data;
+          err = js_create_arraybuffer(env, len, &data, &buffer);
+          assert(err == 0);
+          memcpy(data, bytes, len);
+
+          char key[16];
+          snprintf(key, sizeof(key), "%u", company_id);
+          err = js_set_named_property(env, static_cast<js_value_t *>(result), key, buffer);
+          assert(err == 0);
+        }
+      }
+
+      dbus_message_iter_next(&dict);
+    }
+  }
+
+  dbus_message_unref(reply);
+}
+
+static void
+bare_bluetooth_linux_device_get_service_data(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, js_object_t result
+) {
+  int err;
+
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
+  const char *iface = BLUEZ_DEVICE_IFACE;
+  const char *prop = "ServiceData";
+  dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
+
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  dbus_message_unref(msg);
+
+  if (!reply || dbus_error_is_set(&dbus_err)) {
+    if (dbus_error_is_set(&dbus_err)) dbus_error_free(&dbus_err);
+    return;
+  }
+
+  DBusMessageIter iter, variant, dict;
+  dbus_message_iter_init(reply, &iter);
+  dbus_message_iter_recurse(&iter, &variant);
+
+  if (dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_ARRAY) {
+    dbus_message_iter_recurse(&variant, &dict);
+
+    while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
+      DBusMessageIter entry;
+      dbus_message_iter_recurse(&dict, &entry);
+
+      const char *uuid;
+      dbus_message_iter_get_basic(&entry, &uuid);
+      dbus_message_iter_next(&entry);
+
+      DBusMessageIter val_variant;
+      dbus_message_iter_recurse(&entry, &val_variant);
+
+      if (dbus_message_iter_get_arg_type(&val_variant) == DBUS_TYPE_ARRAY) {
+        DBusMessageIter array_iter;
+        dbus_message_iter_recurse(&val_variant, &array_iter);
+
+        const uint8_t *bytes;
+        int len;
+        dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+
+        if (len > 0) {
+          js_value_t *buffer;
+          void *data;
+          err = js_create_arraybuffer(env, len, &data, &buffer);
+          assert(err == 0);
+          memcpy(data, bytes, len);
+
+          err = js_set_named_property(env, static_cast<js_value_t *>(result), uuid, buffer);
+          assert(err == 0);
+        }
+      }
+
+      dbus_message_iter_next(&dict);
+    }
+  }
+
+  dbus_message_unref(reply);
+}
+
 static void
 bare_bluetooth_linux__call_method_async(
   js_env_t *env,
@@ -1564,6 +1709,9 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)
   V("deviceGetConnected", bare_bluetooth_linux_device_get_connected)
+  V("deviceGetUUIDs", bare_bluetooth_linux_device_get_uuids)
+  V("deviceGetManufacturerData", bare_bluetooth_linux_device_get_manufacturer_data)
+  V("deviceGetServiceData", bare_bluetooth_linux_device_get_service_data)
   V("deviceConnect", bare_bluetooth_linux_device_connect)
   V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
   V("devicePair", bare_bluetooth_linux_device_pair)
