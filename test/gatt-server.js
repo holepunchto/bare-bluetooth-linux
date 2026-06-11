@@ -76,8 +76,14 @@ test('full GATT tree assembly', (t) => {
   const app = new GattApplication()
 
   const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
-  const ch1 = new GattCharacteristic({ uuid: '12345678-1234-1234-1234-123456789ab1', flags: ['read'] })
-  const ch2 = new GattCharacteristic({ uuid: '12345678-1234-1234-1234-123456789ab2', flags: ['write'] })
+  const ch1 = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read']
+  })
+  const ch2 = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab2',
+    flags: ['write']
+  })
   svc.addCharacteristic(ch1)
   svc.addCharacteristic(ch2)
   app.addService(svc)
