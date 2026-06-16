@@ -1,5 +1,6 @@
 const test = require('brittle')
-const { GattApplication, GattService, GattCharacteristic } = require('..')
+const { Adapter, GattApplication, GattService, GattCharacteristic } = require('..')
+const { isCI } = require('./helpers')
 
 test('GattApplication is exported', (t) => {
   t.is(typeof GattApplication, 'function')
@@ -17,7 +18,8 @@ test('GattCharacteristic is exported', (t) => {
 })
 
 test('GattApplication manages services', (t) => {
-  const app = new GattApplication()
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  t.is(app.path, '/com/test/gatt')
   t.alike(app.services, [])
 
   const svc = new GattService({ uuid: '180a' })
@@ -73,7 +75,7 @@ test('GattCharacteristic value setter', (t) => {
 })
 
 test('full GATT tree assembly', (t) => {
-  const app = new GattApplication()
+  const app = new GattApplication({ path: '/com/test/gatt' })
 
   const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
   const ch1 = new GattCharacteristic({
@@ -92,4 +94,46 @@ test('full GATT tree assembly', (t) => {
   t.is(app.services[0].characteristics.length, 2)
   t.is(app.services[0].characteristics[0].uuid, '12345678-1234-1234-1234-123456789ab1')
   t.is(app.services[0].characteristics[1].uuid, '12345678-1234-1234-1234-123456789ab2')
+})
+
+test('registerApplication rejects if already registered', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
+  const ch = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read']
+  })
+  svc.addCharacteristic(ch)
+  app.addService(svc)
+
+  await adapter.registerApplication(app)
+
+  const app2 = new GattApplication({ path: '/com/test/gatt2' })
+  app2.addService(new GattService({ uuid: '12345678-1234-1234-1234-123456789abd' }))
+
+  await t.exception(() => adapter.registerApplication(app2), /already registered/)
+
+  await adapter.unregisterApplication(app)
+})
+
+test('characteristic value setter throws after unregister', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
+  const ch = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read', 'write']
+  })
+  svc.addCharacteristic(ch)
+  app.addService(svc)
+
+  await adapter.registerApplication(app)
+  await adapter.unregisterApplication(app)
+
+  t.exception(() => {
+    ch.value = new Uint8Array([0x01])
+  })
 })
