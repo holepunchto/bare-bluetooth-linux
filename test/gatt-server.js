@@ -17,7 +17,8 @@ test('GattCharacteristic is exported', (t) => {
 })
 
 test('GattApplication manages services', (t) => {
-  const app = new GattApplication()
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  t.is(app.path, '/com/test/gatt')
   t.alike(app.services, [])
 
   const svc = new GattService({ uuid: '180a' })
@@ -73,7 +74,7 @@ test('GattCharacteristic value setter', (t) => {
 })
 
 test('full GATT tree assembly', (t) => {
-  const app = new GattApplication()
+  const app = new GattApplication({ path: '/com/test/gatt' })
 
   const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
   const ch1 = new GattCharacteristic({

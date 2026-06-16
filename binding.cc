@@ -22,7 +22,6 @@
 #define BLUEZ_LE_ADV_IFACE       "org.bluez.LEAdvertisement1"
 #define BLUEZ_GATT_MGR_IFACE     "org.bluez.GattManager1"
 #define BLUEZ_ADV_PATH           "/com/bare/advertisement0"
-#define BLUEZ_GATT_APP_PATH      "/com/bare/gatt"
 #define DBUS_TIMEOUT             2000
 #define DBUS_CONNECT_TIMEOUT     30000
 #define DBUS_POLL_INTERVAL       200
@@ -423,7 +422,7 @@ struct bare_bluetooth_linux_advertisement_t {
   std::vector<std::string> service_uuids;
 };
 
-struct bare_bluetooth_linux_local_char_t {
+struct bare_bluetooth_linux_local_characteristic_t {
   std::string uuid;
   std::vector<std::string> flags;
   std::vector<uint8_t> value;
@@ -435,19 +434,20 @@ struct bare_bluetooth_linux_local_service_t {
   std::string uuid;
   bool primary;
   std::string path;
-  std::vector<bare_bluetooth_linux_local_char_t> characteristics;
+  std::vector<bare_bluetooth_linux_local_characteristic_t> characteristics;
 };
 
 struct bare_bluetooth_linux_gatt_app_t {
+  std::string path;
   std::vector<bare_bluetooth_linux_local_service_t> services;
 };
 
-struct bare_bluetooth_linux_gatt_char_write_event_t {
+struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
   std::string path;
   std::vector<uint8_t> value;
 };
 
-using bare_bluetooth_linux__on_gatt_char_write_fn =
+using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
   js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t>;
 
 struct bare_bluetooth_linux_adapter_t {
@@ -472,7 +472,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_char_value;
   js_threadsafe_function_t *tsfn_device_props_changed;
   js_threadsafe_function_t *tsfn_adv_released;
-  js_threadsafe_function_t *tsfn_gatt_char_write;
+  js_threadsafe_function_t *tsfn_gatt_characteristic_write;
   bare_bluetooth_linux_advertisement_t adv;
   bare_bluetooth_linux_gatt_app_t gatt_app;
 };
@@ -757,11 +757,11 @@ bare_bluetooth_linux__on_adv_released(
 }
 
 static void
-bare_bluetooth_linux__on_gatt_char_write(
+bare_bluetooth_linux__on_gatt_characteristic_write(
   js_env_t *env,
-  bare_bluetooth_linux__on_gatt_char_write_fn function,
+  bare_bluetooth_linux__on_gatt_characteristic_write_fn function,
   bare_bluetooth_linux_tsfn_ctx_t *ctx,
-  bare_bluetooth_linux_gatt_char_write_event_t *event
+  bare_bluetooth_linux_gatt_characteristic_write_event_t *event
 ) {
   int err;
 
@@ -1273,18 +1273,18 @@ dbus_dict_append_byte_array(DBusMessageIter *dict, const char *key, const std::v
 }
 
 static void
-bare_bluetooth_linux__gatt_append_service_props(DBusMessageIter *dict, const bare_bluetooth_linux_local_service_t &svc) {
-  dbus_dict_append_string(dict, "UUID", svc.uuid.c_str());
+bare_bluetooth_linux__gatt_append_service_props(DBusMessageIter *dict, const bare_bluetooth_linux_local_service_t &svc, const char *uuid_key, const char *primary_key) {
+  dbus_dict_append_string(dict, uuid_key, svc.uuid.c_str());
   dbus_bool_t primary = svc.primary ? TRUE : FALSE;
-  dbus_dict_append_bool(dict, "Primary", primary);
+  dbus_dict_append_bool(dict, primary_key, primary);
 }
 
 static void
-bare_bluetooth_linux__gatt_append_char_props(DBusMessageIter *dict, const bare_bluetooth_linux_local_char_t &ch) {
-  dbus_dict_append_string(dict, "UUID", ch.uuid.c_str());
-  dbus_dict_append_object_path(dict, "Service", ch.service_path.c_str());
-  dbus_dict_append_string_array(dict, "Flags", ch.flags);
-  dbus_dict_append_byte_array(dict, "Value", ch.value);
+bare_bluetooth_linux__gatt_append_characteristic_props(DBusMessageIter *dict, const bare_bluetooth_linux_local_characteristic_t &ch, const char *uuid_key, const char *service_key, const char *flags_key, const char *value_key) {
+  dbus_dict_append_string(dict, uuid_key, ch.uuid.c_str());
+  dbus_dict_append_object_path(dict, service_key, ch.service_path.c_str());
+  dbus_dict_append_string_array(dict, flags_key, ch.flags);
+  dbus_dict_append_byte_array(dict, value_key, ch.value);
 }
 
 static DBusHandlerResult
@@ -1312,7 +1312,7 @@ bare_bluetooth_linux__gatt_message_handler(
       dbus_message_iter_open_container(&ifaces_dict, DBUS_TYPE_DICT_ENTRY, nullptr, &iface_entry);
       dbus_message_iter_append_basic(&iface_entry, DBUS_TYPE_STRING, &svc_iface);
       dbus_message_iter_open_container(&iface_entry, DBUS_TYPE_ARRAY, "{sv}", &props_dict);
-      bare_bluetooth_linux__gatt_append_service_props(&props_dict, svc);
+      bare_bluetooth_linux__gatt_append_service_props(&props_dict, svc, "UUID", "Primary");
       dbus_message_iter_close_container(&iface_entry, &props_dict);
       dbus_message_iter_close_container(&ifaces_dict, &iface_entry);
 
@@ -1331,7 +1331,7 @@ bare_bluetooth_linux__gatt_message_handler(
         dbus_message_iter_open_container(&ch_ifaces_dict, DBUS_TYPE_DICT_ENTRY, nullptr, &ch_iface_entry);
         dbus_message_iter_append_basic(&ch_iface_entry, DBUS_TYPE_STRING, &ch_iface);
         dbus_message_iter_open_container(&ch_iface_entry, DBUS_TYPE_ARRAY, "{sv}", &ch_props_dict);
-        bare_bluetooth_linux__gatt_append_char_props(&ch_props_dict, ch);
+        bare_bluetooth_linux__gatt_append_characteristic_props(&ch_props_dict, ch, "UUID", "Service", "Flags", "Value");
         dbus_message_iter_close_container(&ch_iface_entry, &ch_props_dict);
         dbus_message_iter_close_container(&ch_ifaces_dict, &ch_iface_entry);
 
@@ -1353,7 +1353,7 @@ bare_bluetooth_linux__gatt_message_handler(
         DBusMessageIter iter, dict;
         dbus_message_iter_init_append(reply, &iter);
         dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-        bare_bluetooth_linux__gatt_append_service_props(&dict, svc);
+        bare_bluetooth_linux__gatt_append_service_props(&dict, svc, "UUID", "Primary");
         dbus_message_iter_close_container(&iter, &dict);
         dbus_connection_send(conn, reply, nullptr);
         dbus_message_unref(reply);
@@ -1366,7 +1366,7 @@ bare_bluetooth_linux__gatt_message_handler(
           DBusMessageIter iter, dict;
           dbus_message_iter_init_append(reply, &iter);
           dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-          bare_bluetooth_linux__gatt_append_char_props(&dict, ch);
+          bare_bluetooth_linux__gatt_append_characteristic_props(&dict, ch, "UUID", "Service", "Flags", "Value");
           dbus_message_iter_close_container(&iter, &dict);
           dbus_connection_send(conn, reply, nullptr);
           dbus_message_unref(reply);
@@ -1412,10 +1412,10 @@ bare_bluetooth_linux__gatt_message_handler(
             dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
             ch.value.assign(bytes, bytes + len);
 
-            auto *event = new bare_bluetooth_linux_gatt_char_write_event_t;
+            auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
             event->path = path;
             event->value.assign(bytes, bytes + len);
-            js_call_threadsafe_function(adapter->tsfn_gatt_char_write, event, js_threadsafe_function_nonblocking);
+            js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
           }
 
           DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -1537,7 +1537,7 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_adv_released, js_threadsafe_function_release);
   assert(err == 0);
 
-  err = js_release_threadsafe_function(adapter->tsfn_gatt_char_write, js_threadsafe_function_release);
+  err = js_release_threadsafe_function(adapter->tsfn_gatt_characteristic_write, js_threadsafe_function_release);
   assert(err == 0);
 
   uv_close(reinterpret_cast<uv_handle_t *>(async), bare_bluetooth_linux__on_cleanup_close);
@@ -1571,7 +1571,7 @@ bare_bluetooth_linux_adapter_init(
   bare_bluetooth_linux__on_char_value_fn on_char_value,
   bare_bluetooth_linux__on_device_props_changed_fn on_device_props_changed,
   bare_bluetooth_linux__on_adv_released_fn on_adv_released,
-  bare_bluetooth_linux__on_gatt_char_write_fn on_gatt_char_write
+  bare_bluetooth_linux__on_gatt_characteristic_write_fn on_gatt_characteristic_write
 ) {
   dbus_threads_init_default();
 
@@ -1739,12 +1739,12 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux_adv_released_event_t>(env, on_adv_released, 0, 1, adv_released_ctx, adapter->tsfn_adv_released);
   assert(err == 0);
 
-  auto *gatt_char_write_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  auto *gatt_characteristic_write_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
   err = js_create_threadsafe_function<
-    bare_bluetooth_linux__on_gatt_char_write,
+    bare_bluetooth_linux__on_gatt_characteristic_write,
     bare_bluetooth_linux__on_tsfn_finalize,
     bare_bluetooth_linux_tsfn_ctx_t,
-    bare_bluetooth_linux_gatt_char_write_event_t>(env, on_gatt_char_write, 0, 1, gatt_char_write_ctx, adapter->tsfn_gatt_char_write);
+    bare_bluetooth_linux_gatt_characteristic_write_event_t>(env, on_gatt_characteristic_write, 0, 1, gatt_characteristic_write_ctx, adapter->tsfn_gatt_characteristic_write);
   assert(err == 0);
 
   uv_thread_create(&adapter->thread, bare_bluetooth_linux__dbus_thread, adapter);
@@ -2337,13 +2337,15 @@ bare_bluetooth_linux_advertisement_unregister(
 
 static int32_t
 bare_bluetooth_linux_gatt_service_add(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string uuid, bool primary
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string app_path, std::string uuid, bool primary
 ) {
+  adapter->gatt_app.path = app_path;
+
   bare_bluetooth_linux_local_service_t svc;
   svc.uuid = uuid;
   svc.primary = primary;
   int32_t idx = static_cast<int32_t>(adapter->gatt_app.services.size());
-  svc.path = std::string(BLUEZ_GATT_APP_PATH) + "/service" + std::to_string(idx);
+  svc.path = app_path + "/service" + std::to_string(idx);
   adapter->gatt_app.services.push_back(std::move(svc));
   return idx;
 }
@@ -2354,7 +2356,7 @@ bare_bluetooth_linux_gatt_characteristic_add(
 ) {
   auto &svc = adapter->gatt_app.services[service_index];
 
-  bare_bluetooth_linux_local_char_t ch;
+  bare_bluetooth_linux_local_characteristic_t ch;
   ch.uuid = uuid;
   ch.flags = flags;
   ch.service_path = svc.path;
@@ -2376,7 +2378,7 @@ bare_bluetooth_linux_gatt_register(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, js_function_t<void, js_object_t> callback
 ) {
   dbus_connection_register_fallback(
-    adapter->signal_conn, BLUEZ_GATT_APP_PATH, &bare_bluetooth_linux__gatt_vtable, &*adapter
+    adapter->signal_conn, adapter->gatt_app.path.c_str(), &bare_bluetooth_linux__gatt_vtable, &*adapter
   );
 
   auto *call = new bare_bluetooth_linux_async_call_t();
@@ -2391,7 +2393,7 @@ bare_bluetooth_linux_gatt_register(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_GATT_MGR_IFACE, "RegisterApplication"
   );
 
-  const char *app_path = BLUEZ_GATT_APP_PATH;
+  const char *app_path = adapter->gatt_app.path.c_str();
   DBusMessageIter iter, dict;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &app_path);
@@ -2421,7 +2423,7 @@ bare_bluetooth_linux_gatt_unregister(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_GATT_MGR_IFACE, "UnregisterApplication"
   );
 
-  const char *app_path = BLUEZ_GATT_APP_PATH;
+  const char *app_path = adapter->gatt_app.path.c_str();
   DBusMessageIter iter;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &app_path);
@@ -2430,7 +2432,7 @@ bare_bluetooth_linux_gatt_unregister(
   dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
   dbus_message_unref(msg);
 
-  dbus_connection_unregister_object_path(adapter->signal_conn, BLUEZ_GATT_APP_PATH);
+  dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
   adapter->gatt_app.services.clear();
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
