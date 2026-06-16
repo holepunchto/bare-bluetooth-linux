@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <uv.h>
 #include <vector>
 
@@ -440,6 +441,8 @@ struct bare_bluetooth_linux_local_service_t {
 struct bare_bluetooth_linux_gatt_app_t {
   std::string path;
   std::vector<bare_bluetooth_linux_local_service_t> services;
+  std::unordered_map<std::string, bare_bluetooth_linux_local_service_t *> service_map;
+  std::unordered_map<std::string, bare_bluetooth_linux_local_characteristic_t *> characteristic_map;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
@@ -809,6 +812,8 @@ bare_bluetooth_linux__on_gatt_unregister_notify(DBusPendingCall *pending, void *
     dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
     adapter->gatt_app.path.clear();
     adapter->gatt_app.services.clear();
+    adapter->gatt_app.service_map.clear();
+    adapter->gatt_app.characteristic_map.clear();
   }
 
   js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
@@ -1367,88 +1372,83 @@ bare_bluetooth_linux__gatt_message_handler(
   }
 
   if (dbus_message_is_method_call(msg, DBUS_PROP_IFACE, "GetAll")) {
-    for (const auto &svc : adapter->gatt_app.services) {
-      if (svc.path == path) {
-        DBusMessage *reply = dbus_message_new_method_return(msg);
-        DBusMessageIter iter, dict;
-        dbus_message_iter_init_append(reply, &iter);
-        dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-        bare_bluetooth_linux__gatt_append_service_props(&dict, svc, "UUID", "Primary");
-        dbus_message_iter_close_container(&iter, &dict);
-        dbus_connection_send(conn, reply, nullptr);
-        dbus_message_unref(reply);
-        return DBUS_HANDLER_RESULT_HANDLED;
-      }
-
-      for (const auto &ch : svc.characteristics) {
-        if (ch.path == path) {
-          DBusMessage *reply = dbus_message_new_method_return(msg);
-          DBusMessageIter iter, dict;
-          dbus_message_iter_init_append(reply, &iter);
-          dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-          bare_bluetooth_linux__gatt_append_characteristic_props(&dict, ch, "UUID", "Service", "Flags", "Value");
-          dbus_message_iter_close_container(&iter, &dict);
-          dbus_connection_send(conn, reply, nullptr);
-          dbus_message_unref(reply);
-          return DBUS_HANDLER_RESULT_HANDLED;
-        }
-      }
+    auto svc_it = adapter->gatt_app.service_map.find(path);
+    if (svc_it != adapter->gatt_app.service_map.end()) {
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      DBusMessageIter iter, dict;
+      dbus_message_iter_init_append(reply, &iter);
+      dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
+      bare_bluetooth_linux__gatt_append_service_props(&dict, *svc_it->second, "UUID", "Primary");
+      dbus_message_iter_close_container(&iter, &dict);
+      dbus_connection_send(conn, reply, nullptr);
+      dbus_message_unref(reply);
+      return DBUS_HANDLER_RESULT_HANDLED;
     }
+
+    auto ch_it = adapter->gatt_app.characteristic_map.find(path);
+    if (ch_it != adapter->gatt_app.characteristic_map.end()) {
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      DBusMessageIter iter, dict;
+      dbus_message_iter_init_append(reply, &iter);
+      dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
+      bare_bluetooth_linux__gatt_append_characteristic_props(&dict, *ch_it->second, "UUID", "Service", "Flags", "Value");
+      dbus_message_iter_close_container(&iter, &dict);
+      dbus_connection_send(conn, reply, nullptr);
+      dbus_message_unref(reply);
+      return DBUS_HANDLER_RESULT_HANDLED;
+    }
+
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
   }
 
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "ReadValue")) {
-    for (const auto &svc : adapter->gatt_app.services) {
-      for (const auto &ch : svc.characteristics) {
-        if (ch.path == path) {
-          DBusMessage *reply = dbus_message_new_method_return(msg);
-          DBusMessageIter iter, array;
-          dbus_message_iter_init_append(reply, &iter);
-          dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array);
-          for (const auto &b : ch.value) {
-            dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &b);
-          }
-          dbus_message_iter_close_container(&iter, &array);
-          dbus_connection_send(conn, reply, nullptr);
-          dbus_message_unref(reply);
-          return DBUS_HANDLER_RESULT_HANDLED;
-        }
+    auto it = adapter->gatt_app.characteristic_map.find(path);
+    if (it != adapter->gatt_app.characteristic_map.end()) {
+      auto &ch = *it->second;
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      DBusMessageIter iter, array;
+      dbus_message_iter_init_append(reply, &iter);
+      dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array);
+      for (const auto &b : ch.value) {
+        dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &b);
       }
+      dbus_message_iter_close_container(&iter, &array);
+      dbus_connection_send(conn, reply, nullptr);
+      dbus_message_unref(reply);
+      return DBUS_HANDLER_RESULT_HANDLED;
     }
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
   }
 
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "WriteValue")) {
-    for (auto &svc : adapter->gatt_app.services) {
-      for (auto &ch : svc.characteristics) {
-        if (ch.path == path) {
-          DBusMessageIter args;
-          if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
-            DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
-            dbus_connection_send(conn, error, nullptr);
-            dbus_message_unref(error);
-            return DBUS_HANDLER_RESULT_HANDLED;
-          }
-
-          DBusMessageIter array_iter;
-          dbus_message_iter_recurse(&args, &array_iter);
-
-          const uint8_t *bytes;
-          int len;
-          dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
-          ch.value.assign(bytes, bytes + len);
-
-          auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
-          event->path = path;
-          event->value.assign(bytes, bytes + len);
-          js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
-
-          DBusMessage *reply = dbus_message_new_method_return(msg);
-          dbus_connection_send(conn, reply, nullptr);
-          dbus_message_unref(reply);
-          return DBUS_HANDLER_RESULT_HANDLED;
-        }
+    auto it = adapter->gatt_app.characteristic_map.find(path);
+    if (it != adapter->gatt_app.characteristic_map.end()) {
+      auto &ch = *it->second;
+      DBusMessageIter args;
+      if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
+        DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
+        dbus_connection_send(conn, error, nullptr);
+        dbus_message_unref(error);
+        return DBUS_HANDLER_RESULT_HANDLED;
       }
+
+      DBusMessageIter array_iter;
+      dbus_message_iter_recurse(&args, &array_iter);
+
+      const uint8_t *bytes;
+      int len;
+      dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+      ch.value.assign(bytes, bytes + len);
+
+      auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
+      event->path = path;
+      event->value.assign(bytes, bytes + len);
+      js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
+
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      dbus_connection_send(conn, reply, nullptr);
+      dbus_message_unref(reply);
+      return DBUS_HANDLER_RESULT_HANDLED;
     }
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
   }
@@ -2377,6 +2377,7 @@ bare_bluetooth_linux_gatt_service_add(
   int32_t idx = static_cast<int32_t>(adapter->gatt_app.services.size());
   svc.path = app_path + "/service" + std::to_string(idx);
   adapter->gatt_app.services.push_back(std::move(svc));
+  adapter->gatt_app.service_map[adapter->gatt_app.services.back().path] = &adapter->gatt_app.services.back();
   return idx;
 }
 
@@ -2405,6 +2406,7 @@ bare_bluetooth_linux_gatt_characteristic_add(
   int32_t idx = static_cast<int32_t>(svc.characteristics.size());
   ch.path = svc.path + "/char" + std::to_string(idx);
   svc.characteristics.push_back(std::move(ch));
+  adapter->gatt_app.characteristic_map[svc.characteristics.back().path] = &svc.characteristics.back();
   return svc.characteristics.back().path;
 }
 
