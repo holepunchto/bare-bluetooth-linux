@@ -96,6 +96,28 @@ test('full GATT tree assembly', (t) => {
   t.is(app.services[0].characteristics[1].uuid, '12345678-1234-1234-1234-123456789ab2')
 })
 
+test('registerApplication rejects if already registered', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
+  const ch = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read']
+  })
+  svc.addCharacteristic(ch)
+  app.addService(svc)
+
+  await adapter.registerApplication(app)
+
+  const app2 = new GattApplication({ path: '/com/test/gatt2' })
+  app2.addService(new GattService({ uuid: '12345678-1234-1234-1234-123456789abd' }))
+
+  await t.exception(() => adapter.registerApplication(app2), /already registered/)
+
+  await adapter.unregisterApplication(app)
+})
+
 test('characteristic value setter throws after unregister', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 
