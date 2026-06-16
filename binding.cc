@@ -795,6 +795,26 @@ bare_bluetooth_linux__on_gatt_characteristic_write(
   }
 
 static void
+bare_bluetooth_linux__on_gatt_unregister_notify(DBusPendingCall *pending, void *data) {
+  auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
+
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  DBUS_EXTRACT_ERROR(reply, call->error);
+
+  dbus_message_unref(reply);
+  dbus_pending_call_unref(pending);
+
+  auto *adapter = call->adapter;
+  if (!adapter->gatt_app.path.empty()) {
+    dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
+    adapter->gatt_app.path.clear();
+    adapter->gatt_app.services.clear();
+  }
+
+  js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
+}
+
+static void
 bare_bluetooth_linux__on_pending_call_notify(DBusPendingCall *pending, void *data) {
   auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
 
@@ -2447,11 +2467,7 @@ bare_bluetooth_linux_gatt_unregister(
   dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
   dbus_message_unref(msg);
 
-  dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
-  adapter->gatt_app.path.clear();
-  adapter->gatt_app.services.clear();
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_gatt_unregister_notify, call, NULL);
 }
 
 static void
