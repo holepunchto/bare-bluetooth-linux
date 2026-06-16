@@ -2380,13 +2380,13 @@ bare_bluetooth_linux_gatt_service_add(
   return idx;
 }
 
-static int32_t
+static std::optional<std::string>
 bare_bluetooth_linux_gatt_characteristic_add(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, int32_t service_index, std::string uuid, std::vector<std::string> flags, js_typedarray_t<uint8_t> value
 ) {
   if (service_index < 0 || service_index >= static_cast<int32_t>(adapter->gatt_app.services.size())) {
     js_throw_error(env, nullptr, "service_index out of bounds");
-    return -1;
+    return std::nullopt;
   }
 
   auto &svc = adapter->gatt_app.services[service_index];
@@ -2405,7 +2405,7 @@ bare_bluetooth_linux_gatt_characteristic_add(
   int32_t idx = static_cast<int32_t>(svc.characteristics.size());
   ch.path = svc.path + "/char" + std::to_string(idx);
   svc.characteristics.push_back(std::move(ch));
-  return idx;
+  return svc.characteristics.back().path;
 }
 
 static void
@@ -2472,26 +2472,21 @@ bare_bluetooth_linux_gatt_unregister(
 
 static void
 bare_bluetooth_linux_gatt_characteristic_set_value(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, int32_t service_index, int32_t char_index, js_typedarray_t<uint8_t> value
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string char_path, js_typedarray_t<uint8_t> value
 ) {
-  if (service_index < 0 || service_index >= static_cast<int32_t>(adapter->gatt_app.services.size())) {
-    js_throw_error(env, nullptr, "service_index out of bounds");
-    return;
+  for (auto &svc : adapter->gatt_app.services) {
+    for (auto &ch : svc.characteristics) {
+      if (ch.path == char_path) {
+        uint8_t *data;
+        size_t len;
+        int err = js_get_typedarray_info(env, value, data, len);
+        assert(err == 0);
+
+        ch.value.assign(data, data + len);
+        return;
+      }
+    }
   }
-
-  auto &svc = adapter->gatt_app.services[service_index];
-
-  if (char_index < 0 || char_index >= static_cast<int32_t>(svc.characteristics.size())) {
-    js_throw_error(env, nullptr, "characteristic_index out of bounds");
-    return;
-  }
-
-  uint8_t *data;
-  size_t len;
-  int err = js_get_typedarray_info(env, value, data, len);
-  assert(err == 0);
-
-  svc.characteristics[char_index].value.assign(data, data + len);
 }
 
 static js_value_t *
