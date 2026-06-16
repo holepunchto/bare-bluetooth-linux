@@ -2448,6 +2448,7 @@ bare_bluetooth_linux_gatt_unregister(
   dbus_message_unref(msg);
 
   dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
+  adapter->gatt_app.path.clear();
   adapter->gatt_app.services.clear();
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
