@@ -2344,7 +2344,12 @@ static int32_t
 bare_bluetooth_linux_gatt_service_add(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string app_path, std::string uuid, bool primary
 ) {
-  adapter->gatt_app.path = app_path;
+  if (adapter->gatt_app.path.empty()) {
+    adapter->gatt_app.path = app_path;
+  } else if (adapter->gatt_app.path != app_path) {
+    js_throw_error(env, nullptr, "All services must share the same application path");
+    return -1;
+  }
 
   bare_bluetooth_linux_local_service_t svc;
   svc.uuid = uuid;

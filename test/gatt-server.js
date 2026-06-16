@@ -1,5 +1,6 @@
 const test = require('brittle')
-const { GattApplication, GattService, GattCharacteristic } = require('..')
+const { Adapter, GattApplication, GattService, GattCharacteristic } = require('..')
+const { isCI } = require('./helpers')
 
 test('GattApplication is exported', (t) => {
   t.is(typeof GattApplication, 'function')
@@ -93,4 +94,24 @@ test('full GATT tree assembly', (t) => {
   t.is(app.services[0].characteristics.length, 2)
   t.is(app.services[0].characteristics[0].uuid, '12345678-1234-1234-1234-123456789ab1')
   t.is(app.services[0].characteristics[1].uuid, '12345678-1234-1234-1234-123456789ab2')
+})
+
+test('characteristic value setter throws after unregister', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const app = new GattApplication({ path: '/com/test/gatt' })
+  const svc = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
+  const ch = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read', 'write']
+  })
+  svc.addCharacteristic(ch)
+  app.addService(svc)
+
+  await adapter.registerApplication(app)
+  await adapter.unregisterApplication(app)
+
+  t.exception(() => {
+    ch.value = new Uint8Array([0x01])
+  })
 })
