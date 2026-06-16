@@ -1403,20 +1403,25 @@ bare_bluetooth_linux__gatt_message_handler(
       for (auto &ch : svc.characteristics) {
         if (ch.path == path) {
           DBusMessageIter args;
-          if (dbus_message_iter_init(msg, &args) && dbus_message_iter_get_arg_type(&args) == DBUS_TYPE_ARRAY) {
-            DBusMessageIter array_iter;
-            dbus_message_iter_recurse(&args, &array_iter);
-
-            const uint8_t *bytes;
-            int len;
-            dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
-            ch.value.assign(bytes, bytes + len);
-
-            auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
-            event->path = path;
-            event->value.assign(bytes, bytes + len);
-            js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
+          if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
+            DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
+            dbus_connection_send(conn, error, nullptr);
+            dbus_message_unref(error);
+            return DBUS_HANDLER_RESULT_HANDLED;
           }
+
+          DBusMessageIter array_iter;
+          dbus_message_iter_recurse(&args, &array_iter);
+
+          const uint8_t *bytes;
+          int len;
+          dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+          ch.value.assign(bytes, bytes + len);
+
+          auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
+          event->path = path;
+          event->value.assign(bytes, bytes + len);
+          js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
 
           DBusMessage *reply = dbus_message_new_method_return(msg);
           dbus_connection_send(conn, reply, nullptr);
