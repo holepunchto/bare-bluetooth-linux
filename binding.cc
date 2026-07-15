@@ -448,10 +448,12 @@ struct bare_bluetooth_linux_gatt_app_t {
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
   std::string path;
   std::vector<uint8_t> value;
+  uint16_t offset;
+  std::string type;
 };
 
 using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
-  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t>;
+  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t, uint32_t, std::string>;
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
@@ -780,7 +782,7 @@ bare_bluetooth_linux__on_gatt_characteristic_write(
   err = js_create_arraybuffer(env, event->value, buffer);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer, (uint32_t) event->offset, event->type);
 
   delete event;
 
@@ -1440,9 +1442,35 @@ bare_bluetooth_linux__gatt_message_handler(
       dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
       ch.value.assign(bytes, bytes + len);
 
+      uint16_t offset = 0;
+      std::string write_type;
+      dbus_message_iter_next(&args);
+      if (dbus_message_iter_get_arg_type(&args) == DBUS_TYPE_ARRAY) {
+        DBusMessageIter opts_iter;
+        dbus_message_iter_recurse(&args, &opts_iter);
+        while (dbus_message_iter_get_arg_type(&opts_iter) == DBUS_TYPE_DICT_ENTRY) {
+          DBusMessageIter entry, variant;
+          dbus_message_iter_recurse(&opts_iter, &entry);
+          const char *key;
+          dbus_message_iter_get_basic(&entry, &key);
+          dbus_message_iter_next(&entry);
+          dbus_message_iter_recurse(&entry, &variant);
+          if (strcmp(key, "offset") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_UINT16) {
+            dbus_message_iter_get_basic(&variant, &offset);
+          } else if (strcmp(key, "type") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
+            const char *t;
+            dbus_message_iter_get_basic(&variant, &t);
+            write_type = t;
+          }
+          dbus_message_iter_next(&opts_iter);
+        }
+      }
+
       auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
       event->path = path;
       event->value.assign(bytes, bytes + len);
+      event->offset = offset;
+      event->type = write_type;
       js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
 
       DBusMessage *reply = dbus_message_new_method_return(msg);
