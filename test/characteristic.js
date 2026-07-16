@@ -8,6 +8,14 @@ let service
 let notifiableCharacteristic
 let writableCharacteristic
 
+test('Characteristic has property constants', (t) => {
+  t.is(Characteristic.PROPERTY_READ, 0x02)
+  t.is(Characteristic.PROPERTY_WRITE_WITHOUT_RESPONSE, 0x04)
+  t.is(Characteristic.PROPERTY_WRITE, 0x08)
+  t.is(Characteristic.PROPERTY_NOTIFY, 0x10)
+  t.is(Characteristic.PROPERTY_INDICATE, 0x20)
+})
+
 function needsNotifiableCharacteristic(t) {
   if (!notifiableCharacteristic) {
     t.pass('no notifiable characteristic available')
@@ -93,6 +101,11 @@ test('service tracks characteristics', { skip: isCI }, (t) => {
 test('characteristic has flags', { skip: isCI }, (t) => {
   if (!needsNotifiableCharacteristic(t)) return
   t.ok(Array.isArray(notifiableCharacteristic.flags))
+})
+
+test('characteristic has properties', { skip: isCI }, (t) => {
+  if (!needsNotifiableCharacteristic(t)) return
+  t.ok(typeof notifiableCharacteristic.properties === 'number')
 })
 
 test('mtu is a number', { skip: isCI }, (t) => {
