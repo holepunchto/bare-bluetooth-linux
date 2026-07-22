@@ -1905,6 +1905,13 @@ bare_bluetooth_linux_device_get_connected(
   return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Connected");
 }
 
+static bool
+bare_bluetooth_linux_device_get_services_resolved(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_bool_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "ServicesResolved");
+}
+
 static std::vector<std::string>
 bare_bluetooth_linux_device_get_uuids(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
@@ -2514,6 +2521,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)
   V("deviceGetConnected", bare_bluetooth_linux_device_get_connected)
+  V("deviceGetServicesResolved", bare_bluetooth_linux_device_get_services_resolved)
   V("deviceGetUUIDs", bare_bluetooth_linux_device_get_uuids)
   V("deviceGetManufacturerData", bare_bluetooth_linux_device_get_manufacturer_data)
   V("deviceGetServiceData", bare_bluetooth_linux_device_get_service_data)
