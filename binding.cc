@@ -1878,6 +1878,13 @@ bare_bluetooth_linux_device_get_address(
 }
 
 static std::optional<std::string>
+bare_bluetooth_linux_device_get_address_type(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "AddressType");
+}
+
+static std::optional<std::string>
 bare_bluetooth_linux_device_get_name(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
@@ -2517,6 +2524,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("adapterStopDiscovery", bare_bluetooth_linux_adapter_stop_discovery)
 
   V("deviceGetAddress", bare_bluetooth_linux_device_get_address)
+  V("deviceGetAddressType", bare_bluetooth_linux_device_get_address_type)
   V("deviceGetName", bare_bluetooth_linux_device_get_name)
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)

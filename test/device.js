@@ -20,6 +20,7 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
 
   t.ok(typeof device.address === 'string')
   t.ok(device.address.length > 0)
+  t.ok(device.addressType === 'public' || device.addressType === 'random')
   t.ok(typeof device.path === 'string')
   t.ok(device.name === undefined || typeof device.name === 'string')
   t.ok(device.rssi === undefined || typeof device.rssi === 'number')
