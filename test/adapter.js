@@ -106,3 +106,98 @@ test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) =
   t.ok(device)
   t.ok(adapter.devices.has(device.path))
 })
+
+test('enumerate returns the devices map', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  const devices = adapter.enumerate()
+
+  t.is(devices, adapter.devices)
+})
+
+test('enumerate surfaces known devices without discovery', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  const seen = []
+  adapter.on('device', (device) => seen.push(device))
+
+  t.is(adapter.devices.size, 0, 'empty before enumerate')
+
+  adapter.enumerate()
+
+  // Requires at least one paired device on the test machine; BlueZ re-creates
+  // those at boot, so InterfacesAdded never fires for them.
+  if (adapter.devices.size === 0) {
+    t.comment('no known devices, skipping')
+    return
+  }
+
+  t.is(seen.length, adapter.devices.size, 'emits device for each')
+
+  for (const device of adapter.devices.values()) {
+    t.ok(typeof device.address === 'string')
+    t.ok(adapter.devices.has(device.path))
+  }
+})
+
+test('enumerate is idempotent', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  adapter.enumerate()
+  const size = adapter.devices.size
+
+  if (size === 0) {
+    t.comment('no known devices, skipping')
+    return
+  }
+
+  let emitted = 0
+  adapter.on('device', () => emitted++)
+
+  adapter.enumerate()
+
+  t.is(adapter.devices.size, size, 'no new devices')
+  t.is(emitted, 0, 'no duplicate events')
+})
+
+test('enumerate populates the cached gatt tree', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  adapter.enumerate()
+
+  let withServices = 0
+  for (const device of adapter.devices.values()) {
+    if (device.services.size > 0) withServices++
+  }
+
+  if (withServices === 0) {
+    t.comment('no device has a cached gatt tree, skipping')
+    return
+  }
+
+  t.pass(`${withServices} device(s) have cached services`)
+})
+
+test('getDevice finds an enumerated device by address', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  adapter.enumerate()
+
+  const [device] = adapter.devices.values()
+
+  if (!device) {
+    t.comment('no known devices, skipping')
+    return
+  }
+
+  t.is(adapter.getDevice(device.address), device)
+  t.is(adapter.getDevice(device.address.toLowerCase()), device, 'case insensitive')
+})
+
+test('getDevice returns null for an unknown address', { skip: isCI }, (t) => {
+  using adapter = new Adapter()
+
+  adapter.enumerate()
+
+  t.is(adapter.getDevice('00:00:00:00:00:00'), null)
+})

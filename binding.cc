@@ -958,20 +958,14 @@ bare_bluetooth_linux__on_tsfn_finalize(js_env_t *env, bare_bluetooth_linux_tsfn_
   adapter->~bare_bluetooth_linux_adapter_t();
 }
 
+// Parses an `a{sa{sv}}` interface dictionary for a single object and emits the
+// corresponding added-event(s). Shared by the InterfacesAdded signal handler and
+// by GetManagedObjects enumeration, which carry the same payload shape.
 static void
-bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapter, DBusMessage *msg) {
-  DBusMessageIter args;
-  if (!dbus_message_iter_init(msg, &args)) return;
-
-  const char *obj_path;
-  dbus_message_iter_get_basic(&args, &obj_path);
-  dbus_message_iter_next(&args);
-
-  if (strncmp(obj_path, adapter->adapter_path.c_str(), adapter->adapter_path.length()) != 0)
-    return;
-
-  DBusMessageIter ifaces_iter;
-  dbus_message_iter_recurse(&args, &ifaces_iter);
+bare_bluetooth_linux__emit_interfaces_added(
+  bare_bluetooth_linux_adapter_t *adapter, const char *obj_path, DBusMessageIter *ifaces_iter_in
+) {
+  DBusMessageIter ifaces_iter = *ifaces_iter_in;
 
   bool is_device = false;
   std::string address;
@@ -1063,6 +1057,24 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
     event->uuid = desc_uuid;
     js_call_threadsafe_function(adapter->tsfn_desc_added, event, js_threadsafe_function_nonblocking);
   }
+}
+
+static void
+bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapter, DBusMessage *msg) {
+  DBusMessageIter args;
+  if (!dbus_message_iter_init(msg, &args)) return;
+
+  const char *obj_path;
+  dbus_message_iter_get_basic(&args, &obj_path);
+  dbus_message_iter_next(&args);
+
+  if (strncmp(obj_path, adapter->adapter_path.c_str(), adapter->adapter_path.length()) != 0)
+    return;
+
+  DBusMessageIter ifaces_iter;
+  dbus_message_iter_recurse(&args, &ifaces_iter);
+
+  bare_bluetooth_linux__emit_interfaces_added(adapter, obj_path, &ifaces_iter);
 }
 
 static void
@@ -1870,6 +1882,114 @@ bare_bluetooth_linux_adapter_stop_discovery(
   }
 }
 
+// Enumerates objects BlueZ already knows about via ObjectManager.GetManagedObjects.
+//
+// InterfacesAdded only fires when bluetoothd *creates* an object, but bonded
+// devices (and their cached GATT tree) persist across restarts and are re-created
+// before we connect. Without this they are invisible: no 'device' event ever fires
+// and the services map stays empty.
+//
+// Returns a flat vector of ("device"|"service"|"characteristic"|"descriptor",
+// path, address-or-uuid) triples in BlueZ's tree order, rather than dispatching
+// through the threadsafe functions. Those are independent queues with no ordering
+// guarantee between them, and a service delivered ahead of its device would be
+// dropped by the JS side. Returning the data lets JS apply it parent-first.
+static std::vector<std::string>
+bare_bluetooth_linux_adapter_enumerate(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
+) {
+  std::vector<std::string> result;
+
+  DBusMessage *msg =
+    dbus_message_new_method_call(BLUEZ_BUS, "/", DBUS_OM_IFACE, "GetManagedObjects");
+  if (msg == nullptr) return result;
+
+  DBusError dbus_err;
+  dbus_error_init(&dbus_err);
+  DBusMessage *reply =
+    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
+  dbus_message_unref(msg);
+
+  if (reply == nullptr) {
+    std::string message = dbus_error_is_set(&dbus_err) ? dbus_err.message : "GetManagedObjects failed";
+    if (dbus_error_is_set(&dbus_err)) dbus_error_free(&dbus_err);
+    int err = js_throw_error(env, nullptr, message.c_str());
+    assert(err == 0);
+    return result;
+  }
+
+  DBusMessageIter args;
+  if (!dbus_message_iter_init(reply, &args)) {
+    dbus_message_unref(reply);
+    return result;
+  }
+
+  DBusMessageIter objects;
+  dbus_message_iter_recurse(&args, &objects);
+
+  while (dbus_message_iter_get_arg_type(&objects) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter entry;
+    dbus_message_iter_recurse(&objects, &entry);
+
+    const char *obj_path;
+    dbus_message_iter_get_basic(&entry, &obj_path);
+    dbus_message_iter_next(&entry);
+
+    // Only objects below this adapter. The adapter path itself has no trailing
+    // component, so require the separator to avoid matching hci10 from hci1.
+    auto prefix = adapter->adapter_path + "/";
+    if (strncmp(obj_path, prefix.c_str(), prefix.length()) == 0) {
+      DBusMessageIter ifaces_iter;
+      dbus_message_iter_recurse(&entry, &ifaces_iter);
+
+      while (dbus_message_iter_get_arg_type(&ifaces_iter) == DBUS_TYPE_DICT_ENTRY) {
+        DBusMessageIter iface_entry;
+        dbus_message_iter_recurse(&ifaces_iter, &iface_entry);
+
+        const char *iface_name;
+        dbus_message_iter_get_basic(&iface_entry, &iface_name);
+
+        const char *kind = nullptr;
+        const char *key = nullptr;
+
+        if (strcmp(iface_name, BLUEZ_DEVICE_IFACE) == 0) {
+          kind = "device";
+          key = "Address";
+        } else if (strcmp(iface_name, BLUEZ_GATT_SERVICE_IFACE) == 0) {
+          kind = "service";
+          key = "UUID";
+        } else if (strcmp(iface_name, BLUEZ_GATT_CHAR_IFACE) == 0) {
+          kind = "characteristic";
+          key = "UUID";
+        } else if (strcmp(iface_name, BLUEZ_GATT_DESC_IFACE) == 0) {
+          kind = "descriptor";
+          key = "UUID";
+        }
+
+        if (kind != nullptr) {
+          dbus_message_iter_next(&iface_entry);
+          DBusMessageIter props_iter;
+          dbus_message_iter_recurse(&iface_entry, &props_iter);
+          auto value = dbus_find_string_in_props(&props_iter, key);
+          if (value) {
+            result.push_back(kind);
+            result.push_back(obj_path);
+            result.push_back(*value);
+          }
+        }
+
+        dbus_message_iter_next(&ifaces_iter);
+      }
+    }
+
+    dbus_message_iter_next(&objects);
+  }
+
+  dbus_message_unref(reply);
+
+  return result;
+}
+
 static std::optional<std::string>
 bare_bluetooth_linux_device_get_address(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
@@ -2522,6 +2642,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("adapterSetDiscoveryFilter", bare_bluetooth_linux_adapter_set_discovery_filter)
   V("adapterStartDiscovery", bare_bluetooth_linux_adapter_start_discovery)
   V("adapterStopDiscovery", bare_bluetooth_linux_adapter_stop_discovery)
+  V("adapterEnumerate", bare_bluetooth_linux_adapter_enumerate)
 
   V("deviceGetAddress", bare_bluetooth_linux_device_get_address)
   V("deviceGetAddressType", bare_bluetooth_linux_device_get_address_type)
