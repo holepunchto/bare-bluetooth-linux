@@ -2516,13 +2516,25 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
 // The address structure and constants below are the kernel ABI, declared here
 // to avoid a dependency on the BlueZ userspace headers.
 
-#define BARE_AF_BLUETOOTH      31
-#define BARE_BTPROTO_L2CAP     0
-#define BARE_SOL_BLUETOOTH     274
-#define BARE_BT_RCVMTU         13
-#define BARE_BDADDR_LE_PUBLIC  0x01
-#define BARE_BDADDR_LE_RANDOM  0x02
-#define BARE_L2CAP_DEFAULT_MTU 672
+// AF_BLUETOOTH comes from <sys/socket.h>; the rest matches <bluetooth/*.h>
+#ifndef BTPROTO_L2CAP
+#define BTPROTO_L2CAP 0
+#endif
+#ifndef SOL_BLUETOOTH
+#define SOL_BLUETOOTH 274
+#endif
+#ifndef BT_RCVMTU
+#define BT_RCVMTU 13
+#endif
+#ifndef BDADDR_LE_PUBLIC
+#define BDADDR_LE_PUBLIC 0x01
+#endif
+#ifndef BDADDR_LE_RANDOM
+#define BDADDR_LE_RANDOM 0x02
+#endif
+#ifndef L2CAP_DEFAULT_MTU
+#define L2CAP_DEFAULT_MTU 672
+#endif
 
 struct bare_bluetooth_linux_sockaddr_l2_t {
   sa_family_t l2_family;
@@ -2748,7 +2760,7 @@ bare_bluetooth_linux_l2cap__on_io_poll(uv_poll_t *poll, int status, int events) 
   }
 
   if (events & UV_READABLE) {
-    std::vector<uint8_t> buf(ch->rcv_mtu ? ch->rcv_mtu : BARE_L2CAP_DEFAULT_MTU);
+    std::vector<uint8_t> buf(ch->rcv_mtu ? ch->rcv_mtu : L2CAP_DEFAULT_MTU);
 
     while (!ch->closing && !ch->closed) {
       ssize_t n = recv(ch->fd, buf.data(), buf.size(), MSG_DONTWAIT);
@@ -2812,7 +2824,7 @@ bare_bluetooth_linux_l2cap__on_connect_poll(uv_poll_t *poll, int status, int eve
   } else {
     uint16_t mtu = 0;
     socklen_t len = sizeof(mtu);
-    if (getsockopt(ch->fd, BARE_SOL_BLUETOOTH, BARE_BT_RCVMTU, &mtu, &len) == 0 && mtu > 0) {
+    if (getsockopt(ch->fd, SOL_BLUETOOTH, BT_RCVMTU, &mtu, &len) == 0 && mtu > 0) {
       ch->rcv_mtu = mtu;
     }
 
@@ -2861,22 +2873,22 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   if (!local) return fail("Unknown adapter address");
 
   bare_bluetooth_linux_sockaddr_l2_t local_addr = {};
-  local_addr.l2_family = BARE_AF_BLUETOOTH;
-  local_addr.l2_bdaddr_type = BARE_BDADDR_LE_PUBLIC;
+  local_addr.l2_family = AF_BLUETOOTH;
+  local_addr.l2_bdaddr_type = BDADDR_LE_PUBLIC;
   if (!bare_bluetooth_linux__parse_bdaddr(*local, local_addr.l2_bdaddr)) {
     return fail("Invalid adapter address");
   }
 
   bare_bluetooth_linux_sockaddr_l2_t peer_addr = {};
-  peer_addr.l2_family = BARE_AF_BLUETOOTH;
+  peer_addr.l2_family = AF_BLUETOOTH;
   peer_addr.l2_psm = htole16((uint16_t) psm);
   peer_addr.l2_bdaddr_type =
-    address_type && *address_type == "random" ? BARE_BDADDR_LE_RANDOM : BARE_BDADDR_LE_PUBLIC;
+    address_type && *address_type == "random" ? BDADDR_LE_RANDOM : BDADDR_LE_PUBLIC;
   if (!bare_bluetooth_linux__parse_bdaddr(*address, peer_addr.l2_bdaddr)) {
     return fail("Invalid device address");
   }
 
-  int fd = socket(BARE_AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BARE_BTPROTO_L2CAP);
+  int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_L2CAP);
   if (fd < 0) return fail(strerror(errno));
 
   if (bind(fd, reinterpret_cast<sockaddr *>(&local_addr), sizeof(local_addr)) != 0) {
