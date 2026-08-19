@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <unistd.h>
 #include <unordered_map>
+#include <utility>
 #include <uv.h>
 #include <vector>
 
@@ -2554,7 +2555,7 @@ bare_bluetooth_linux__parse_bdaddr(const std::string &str, uint8_t *ba) {
     char *end;
     long value = strtol(at, &end, 16);
     if (end != at + 2 || value < 0 || value > 255) return false;
-    ba[i] = (uint8_t) value;
+    ba[i] = static_cast<uint8_t>(value);
   }
 
   return true;
@@ -2568,9 +2569,41 @@ using bare_bluetooth_linux_l2cap__on_close_fn = js_function_t<void, js_receiver_
 using bare_bluetooth_linux_l2cap__on_open_fn = js_function_t<void, js_receiver_t>;
 using bare_bluetooth_linux_l2cap__on_channel_fn = js_function_t<void, js_object_t, std::optional<js_arraybuffer_t>>;
 
+struct bare_bluetooth_linux_fd_t {
+  int value = -1;
+
+  bare_bluetooth_linux_fd_t() = default;
+
+  explicit bare_bluetooth_linux_fd_t(int value) : value(value) {}
+
+  bare_bluetooth_linux_fd_t(const bare_bluetooth_linux_fd_t &) = delete;
+  bare_bluetooth_linux_fd_t &operator=(const bare_bluetooth_linux_fd_t &) = delete;
+
+  bare_bluetooth_linux_fd_t(bare_bluetooth_linux_fd_t &&other) : value(std::exchange(other.value, -1)) {}
+
+  bare_bluetooth_linux_fd_t &operator=(bare_bluetooth_linux_fd_t &&other) {
+    reset();
+    value = std::exchange(other.value, -1);
+    return *this;
+  }
+
+  ~bare_bluetooth_linux_fd_t() {
+    reset();
+  }
+
+  operator int() const {
+    return value;
+  }
+
+  void reset() {
+    if (value >= 0) close(value);
+    value = -1;
+  }
+};
+
 struct bare_bluetooth_linux_l2cap_t {
   js_env_t *env = nullptr;
-  int fd = -1;
+  bare_bluetooth_linux_fd_t fd;
   uint16_t psm = 0;
   std::string peer;
   uint16_t rcv_mtu = 0;
@@ -2657,8 +2690,7 @@ static void
 bare_bluetooth_linux_l2cap__on_poll_close(uv_handle_t *handle) {
   auto *ch = reinterpret_cast<bare_bluetooth_linux_l2cap_t *>(handle->data);
 
-  close(ch->fd);
-  ch->fd = -1;
+  ch->fd.reset();
   ch->closed = true;
   ch->closing = false;
 
@@ -2765,7 +2797,7 @@ bare_bluetooth_linux_l2cap__on_io_poll(uv_poll_t *poll, int status, int events) 
     while (!ch->closing && !ch->closed) {
       ssize_t n = recv(ch->fd, buf.data(), buf.size(), MSG_DONTWAIT);
       if (n > 0) {
-        bare_bluetooth_linux_l2cap__emit_data(ch, buf.data(), (size_t) n);
+        bare_bluetooth_linux_l2cap__emit_data(ch, buf.data(), static_cast<size_t>(n));
       } else if (n == 0) {
         bare_bluetooth_linux_l2cap__emit(ch, ch->on_end);
         bare_bluetooth_linux_l2cap__close(ch);
@@ -2881,26 +2913,22 @@ bare_bluetooth_linux_device_open_l2cap_channel(
 
   bare_bluetooth_linux_sockaddr_l2_t peer_addr = {};
   peer_addr.l2_family = AF_BLUETOOTH;
-  peer_addr.l2_psm = htole16((uint16_t) psm);
+  peer_addr.l2_psm = htole16(static_cast<uint16_t>(psm));
   peer_addr.l2_bdaddr_type =
     address_type && *address_type == "random" ? BDADDR_LE_RANDOM : BDADDR_LE_PUBLIC;
   if (!bare_bluetooth_linux__parse_bdaddr(*address, peer_addr.l2_bdaddr)) {
     return fail("Invalid device address");
   }
 
-  int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_L2CAP);
+  bare_bluetooth_linux_fd_t fd(socket(AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_L2CAP));
   if (fd < 0) return fail(strerror(errno));
 
   if (bind(fd, reinterpret_cast<sockaddr *>(&local_addr), sizeof(local_addr)) != 0) {
-    int code = errno;
-    close(fd);
-    return fail(strerror(code));
+    return fail(strerror(errno));
   }
 
   if (connect(fd, reinterpret_cast<sockaddr *>(&peer_addr), sizeof(peer_addr)) != 0 && errno != EINPROGRESS) {
-    int code = errno;
-    close(fd);
-    return fail(strerror(code));
+    return fail(strerror(errno));
   }
 
   js_arraybuffer_t handle;
@@ -2911,8 +2939,8 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   new (ch) bare_bluetooth_linux_l2cap_t();
 
   ch->env = env;
-  ch->fd = fd;
-  ch->psm = (uint16_t) psm;
+  ch->fd = std::move(fd);
+  ch->psm = static_cast<uint16_t>(psm);
   ch->peer = *address;
 
   err = js_create_reference(env, handle, ch->self);
@@ -2928,7 +2956,7 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   err = js_get_env_loop(env, &loop);
   assert(err == 0);
 
-  err = uv_poll_init(loop, &ch->poll, fd);
+  err = uv_poll_init(loop, &ch->poll, ch->fd);
   assert(err == 0);
 
   ch->poll.data = ch;
@@ -3016,7 +3044,7 @@ bare_bluetooth_linux_l2cap_write(
 
   if (!ch->closing && !ch->closed && !ch->write_queue.empty()) ch->want_drain = true;
 
-  return (uint32_t) len;
+  return static_cast<uint32_t>(len);
 }
 
 static void

@@ -26,7 +26,8 @@ test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async
   device.openL2CAPChannel(0x80)
 
   const [channel, err] = await new Promise((resolve) => {
-    device.on('channelOpen', (channel, err) => resolve([channel, err]))
+    device.on('channelOpen', (channel) => resolve([channel, null]))
+    device.on('error', (err) => resolve([null, err]))
   })
 
   if (err) {
