@@ -1,6 +1,3 @@
-// Asserts are the test; keep them in every build type
-#undef NDEBUG
-
 // Fill the kernel buffer until a write gets queued, drain the peer, and check
 // the drain callback fires exactly once.
 
@@ -15,8 +12,7 @@
 static int drained = 0;
 
 static void
-on_drain(l2cap_channel_t *channel) {
-  (void) channel;
+on_drain(l2cap_channel_t *) {
   drained++;
 }
 
@@ -40,11 +36,11 @@ main(void) {
   // few KB, orders of magnitude less than the bound allows.
   int r = 0;
   int sent = 0;
-  while ((r = l2cap_channel_write(&a, msg, sizeof(msg), on_drain)) == 0) {
+  while ((r = l2cap_channel_write(&a, msg, sizeof(msg), on_drain)) == L2CAP_WRITE_SENT) {
     sent++;
     assert(sent < 10000);
   }
-  assert(r == 1);
+  assert(r == L2CAP_WRITE_QUEUED);
   assert(l2cap_channel_events(&a) & L2CAP_WRITABLE);
 
   // Drain the peer side, then let the channel flush
@@ -52,8 +48,9 @@ main(void) {
   while (drained == 0) {
     while (recv(fds[1], buf, sizeof(buf), MSG_DONTWAIT) > 0);
 
+    // The peer is already drained, so POLLOUT is immediate: no need to block
     struct pollfd p = {l2cap_channel_fd(&a), POLLOUT, 0};
-    assert(poll(&p, 1, 1000) >= 0);
+    assert(poll(&p, 1, 0) >= 0);
     assert(l2cap_channel_process(&a, L2CAP_WRITABLE) == 0);
   }
 

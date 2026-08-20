@@ -96,34 +96,53 @@ void
 l2cap_channel_init(l2cap_channel_t *channel, void *data) {
   memset(channel, 0, sizeof(*channel));
   channel->data = data;
-  channel->fd = -1;
+  channel->_fd = -1;
 }
 
 static int
 l2cap_channel__opened(l2cap_channel_t *channel) {
   uint16_t mtu = 0;
   socklen_t len = sizeof(mtu);
-  if (getsockopt(channel->fd, SOL_BLUETOOTH, BT_RCVMTU, &mtu, &len) != 0 || mtu == 0) {
+  if (getsockopt(channel->_fd, SOL_BLUETOOTH, BT_RCVMTU, &mtu, &len) != 0 || mtu == 0) {
     mtu = L2CAP_DEFAULT_MTU;
   }
-  channel->rcv_mtu = mtu;
+  channel->_rcv_mtu = mtu;
 
   mtu = 0;
   len = sizeof(mtu);
-  if (getsockopt(channel->fd, SOL_BLUETOOTH, BT_SNDMTU, &mtu, &len) != 0 || mtu == 0) {
+  if (getsockopt(channel->_fd, SOL_BLUETOOTH, BT_SNDMTU, &mtu, &len) != 0 || mtu == 0) {
     mtu = L2CAP_DEFAULT_MTU;
   }
-  channel->snd_mtu = mtu;
+  channel->_snd_mtu = mtu;
 
-  channel->read_buf = malloc(channel->rcv_mtu);
-  if (channel->read_buf == NULL) {
-    channel->state = L2CAP_STATE_FAILED;
+  // _rcv_mtu is never 0 here: both branches above leave a positive value
+  channel->_read_buf = malloc(channel->_rcv_mtu);
+  if (channel->_read_buf == NULL) {
+    channel->_state = L2CAP_STATE_FAILED;
     return -ENOMEM;
   }
 
-  channel->state = L2CAP_STATE_OPEN;
+  channel->_state = L2CAP_STATE_OPEN;
 
   return 0;
+}
+
+// A Bluetooth descriptor carries its endpoints; other families (e.g. the Unix
+// socketpairs used in tests) leave them zeroed
+static void
+l2cap_channel__fill_endpoints(l2cap_channel_t *channel) {
+  struct l2cap_sockaddr_l2 addr;
+  socklen_t len = sizeof(addr);
+
+  if (getpeername(channel->_fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
+    memcpy(channel->_peer.bdaddr, addr.l2_bdaddr, sizeof(addr.l2_bdaddr));
+    channel->_peer.type = addr.l2_bdaddr_type;
+  }
+
+  len = sizeof(addr);
+  if (getsockname(channel->_fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
+    channel->_psm = le16toh(addr.l2_psm);
+  }
 }
 
 int
@@ -135,7 +154,7 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
   memset(&local_addr, 0, sizeof(local_addr));
   local_addr.l2_family = AF_BLUETOOTH;
   local_addr.l2_bdaddr_type = local->type;
-  memcpy(local_addr.l2_bdaddr, local->bdaddr, 6);
+  memcpy(local_addr.l2_bdaddr, local->bdaddr, sizeof(local_addr.l2_bdaddr));
 
   if (bind(fd, (struct sockaddr *) &local_addr, sizeof(local_addr)) != 0) {
     int err = errno;
@@ -148,7 +167,7 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
   peer_addr.l2_family = AF_BLUETOOTH;
   peer_addr.l2_psm = htole16(psm);
   peer_addr.l2_bdaddr_type = peer->type;
-  memcpy(peer_addr.l2_bdaddr, peer->bdaddr, 6);
+  memcpy(peer_addr.l2_bdaddr, peer->bdaddr, sizeof(peer_addr.l2_bdaddr));
 
   if (connect(fd, (struct sockaddr *) &peer_addr, sizeof(peer_addr)) != 0 && errno != EINPROGRESS) {
     int err = errno;
@@ -156,11 +175,11 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
     return -err;
   }
 
-  channel->fd = fd;
-  channel->state = L2CAP_STATE_CONNECTING;
-  channel->psm = psm;
-  channel->peer = *peer;
-  channel->on_connect = cb;
+  channel->_fd = fd;
+  channel->_state = L2CAP_STATE_CONNECTING;
+  channel->_psm = psm;
+  channel->_peer = *peer;
+  channel->_on_connect = cb;
 
   return 0;
 }
@@ -176,26 +195,14 @@ l2cap_channel_accept(l2cap_channel_t *channel, int fd) {
 
   fcntl(fd, F_SETFD, FD_CLOEXEC);
 
-  channel->fd = fd;
+  channel->_fd = fd;
 
-  // A Bluetooth descriptor carries its endpoints; other families (e.g. the
-  // Unix socketpairs used in tests) leave them zeroed
-  struct l2cap_sockaddr_l2 addr;
-  socklen_t len = sizeof(addr);
-  if (getpeername(fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
-    memcpy(channel->peer.bdaddr, addr.l2_bdaddr, 6);
-    channel->peer.type = addr.l2_bdaddr_type;
-  }
-
-  len = sizeof(addr);
-  if (getsockname(fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
-    channel->psm = le16toh(addr.l2_psm);
-  }
+  l2cap_channel__fill_endpoints(channel);
 
   int err = l2cap_channel__opened(channel);
   if (err < 0) {
     close(fd);
-    channel->fd = -1;
+    channel->_fd = -1;
     return err;
   }
 
@@ -204,16 +211,22 @@ l2cap_channel_accept(l2cap_channel_t *channel, int fd) {
 
 int
 l2cap_channel_fd(const l2cap_channel_t *channel) {
-  return channel->fd;
+  return channel->_fd;
 }
 
 int
 l2cap_channel_events(const l2cap_channel_t *channel) {
-  switch (channel->state) {
+  switch (channel->_state) {
   case L2CAP_STATE_CONNECTING:
     return L2CAP_WRITABLE;
-  case L2CAP_STATE_OPEN:
-    return (channel->reading ? L2CAP_READABLE : 0) | (channel->write_head ? L2CAP_WRITABLE : 0);
+
+  case L2CAP_STATE_OPEN: {
+    int events = 0;
+    if (channel->_reading) events |= L2CAP_READABLE;
+    if (channel->_write_head) events |= L2CAP_WRITABLE;
+    return events;
+  }
+
   default:
     return 0;
   }
@@ -221,61 +234,65 @@ l2cap_channel_events(const l2cap_channel_t *channel) {
 
 static int
 l2cap_channel__flush(l2cap_channel_t *channel) {
-  while (channel->write_head) {
-    l2cap_chunk_t *chunk = channel->write_head;
-    if (send(channel->fd, chunk->data, chunk->len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
+  while (channel->_write_head) {
+    l2cap_chunk_t *chunk = channel->_write_head;
+    if (send(channel->_fd, chunk->data, chunk->len, MSG_DONTWAIT | MSG_NOSIGNAL) < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
       if (errno == EINTR) continue;
       return -errno;
     }
 
-    channel->write_head = chunk->next;
-    if (channel->write_head == NULL) channel->write_tail = NULL;
+    channel->_write_head = chunk->next;
+    if (channel->_write_head == NULL) channel->_write_tail = NULL;
     free(chunk);
   }
 
-  if (channel->on_drain) {
-    l2cap_drain_cb cb = channel->on_drain;
-    channel->on_drain = NULL;
+  if (channel->_on_drain) {
+    l2cap_drain_cb cb = channel->_on_drain;
+    channel->_on_drain = NULL;
     cb(channel);
   }
 
   return 0;
 }
 
+// Processing order matters. A pending connect settles first, since nothing
+// else is valid before it. Writes flush before reads so a full send queue
+// drains as early as possible. Reads come last and every callback may close
+// the channel, so each stage re-checks the state before touching the socket.
 int
 l2cap_channel_process(l2cap_channel_t *channel, int events) {
-  if (channel->state == L2CAP_STATE_CONNECTING && (events & L2CAP_WRITABLE)) {
+  if (channel->_state == L2CAP_STATE_CONNECTING && (events & L2CAP_WRITABLE)) {
     int err = 0;
     socklen_t len = sizeof(err);
-    if (getsockopt(channel->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
+    if (getsockopt(channel->_fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
 
     if (err == 0 && l2cap_channel__opened(channel) < 0) err = ENOMEM;
 
     if (err) {
-      channel->state = L2CAP_STATE_FAILED;
-      channel->on_connect(channel, -err);
+      channel->_state = L2CAP_STATE_FAILED;
+      channel->_on_connect(channel, -err);
       return 0;
     }
 
-    channel->on_connect(channel, 0);
+    channel->_on_connect(channel, 0);
   }
 
-  if (channel->state != L2CAP_STATE_OPEN) return 0;
+  if (channel->_state != L2CAP_STATE_OPEN) return 0;
 
   if (events & L2CAP_WRITABLE) {
     int err = l2cap_channel__flush(channel);
     if (err < 0) return err;
-    if (channel->state != L2CAP_STATE_OPEN) return 0;
+    if (channel->_state != L2CAP_STATE_OPEN) return 0;
   }
 
   if (events & L2CAP_READABLE) {
-    while (channel->reading && channel->state == L2CAP_STATE_OPEN) {
-      ssize_t n = recv(channel->fd, channel->read_buf, channel->rcv_mtu, MSG_DONTWAIT);
+    while (channel->_reading && channel->_state == L2CAP_STATE_OPEN) {
+      ssize_t n = recv(channel->_fd, channel->_read_buf, channel->_rcv_mtu, MSG_DONTWAIT);
       if (n > 0) {
-        channel->on_read(channel, (size_t) n, channel->read_buf);
+        channel->_on_read(channel, (size_t) n, channel->_read_buf);
       } else if (n == 0) {
-        channel->on_read(channel, 0, NULL);
+        channel->_on_read(channel, 0, NULL);
         break;
       } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;
@@ -292,26 +309,26 @@ l2cap_channel_process(l2cap_channel_t *channel, int events) {
 
 int
 l2cap_channel_read_start(l2cap_channel_t *channel, l2cap_read_cb cb) {
-  if (channel->state != L2CAP_STATE_OPEN) return -ENOTCONN;
-  channel->reading = 1;
-  channel->on_read = cb;
+  if (channel->_state != L2CAP_STATE_OPEN) return -ENOTCONN;
+  channel->_reading = 1;
+  channel->_on_read = cb;
   return 0;
 }
 
 int
 l2cap_channel_read_stop(l2cap_channel_t *channel) {
-  channel->reading = 0;
+  channel->_reading = 0;
   return 0;
 }
 
 int
 l2cap_channel_write(l2cap_channel_t *channel, const uint8_t *data, size_t len, l2cap_drain_cb cb) {
-  if (channel->state != L2CAP_STATE_OPEN) return -ENOTCONN;
-  if (len == 0) return 0;
-  if (len > channel->snd_mtu) return -EMSGSIZE;
+  if (channel->_state != L2CAP_STATE_OPEN) return -ENOTCONN;
+  if (len == 0) return L2CAP_WRITE_SENT;
+  if (len > channel->_snd_mtu) return -EMSGSIZE;
 
-  if (channel->write_head == NULL) {
-    if (send(channel->fd, data, len, MSG_DONTWAIT | MSG_NOSIGNAL) >= 0) return 0;
+  if (channel->_write_head == NULL) {
+    if (send(channel->_fd, data, len, MSG_DONTWAIT | MSG_NOSIGNAL) >= 0) return L2CAP_WRITE_SENT;
     if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -errno;
   }
 
@@ -322,53 +339,53 @@ l2cap_channel_write(l2cap_channel_t *channel, const uint8_t *data, size_t len, l
   chunk->len = len;
   memcpy(chunk->data, data, len);
 
-  if (channel->write_tail) channel->write_tail->next = chunk;
-  else channel->write_head = chunk;
-  channel->write_tail = chunk;
+  if (channel->_write_tail) channel->_write_tail->next = chunk;
+  else channel->_write_head = chunk;
+  channel->_write_tail = chunk;
 
-  channel->on_drain = cb;
+  channel->_on_drain = cb;
 
-  return 1;
+  return L2CAP_WRITE_QUEUED;
 }
 
 uint16_t
 l2cap_channel_psm(const l2cap_channel_t *channel) {
-  return channel->psm;
+  return channel->_psm;
 }
 
 uint16_t
 l2cap_channel_mtu(const l2cap_channel_t *channel) {
-  return channel->rcv_mtu;
+  return channel->_rcv_mtu;
 }
 
 uint16_t
 l2cap_channel_snd_mtu(const l2cap_channel_t *channel) {
-  return channel->snd_mtu;
+  return channel->_snd_mtu;
 }
 
 const l2cap_addr_t *
 l2cap_channel_peer(const l2cap_channel_t *channel) {
-  return &channel->peer;
+  return &channel->_peer;
 }
 
 void
 l2cap_channel_close(l2cap_channel_t *channel) {
-  if (channel->state == L2CAP_STATE_CLOSED) return;
+  if (channel->_state == L2CAP_STATE_CLOSED) return;
 
-  channel->reading = 0;
+  channel->_reading = 0;
 
-  if (channel->fd >= 0) close(channel->fd);
-  channel->fd = -1;
+  if (channel->_fd >= 0) close(channel->_fd);
+  channel->_fd = -1;
 
-  free(channel->read_buf);
-  channel->read_buf = NULL;
+  free(channel->_read_buf);
+  channel->_read_buf = NULL;
 
-  while (channel->write_head) {
-    l2cap_chunk_t *chunk = channel->write_head;
-    channel->write_head = chunk->next;
+  while (channel->_write_head) {
+    l2cap_chunk_t *chunk = channel->_write_head;
+    channel->_write_head = chunk->next;
     free(chunk);
   }
-  channel->write_tail = NULL;
+  channel->_write_tail = NULL;
 
-  channel->state = L2CAP_STATE_CLOSED;
+  channel->_state = L2CAP_STATE_CLOSED;
 }

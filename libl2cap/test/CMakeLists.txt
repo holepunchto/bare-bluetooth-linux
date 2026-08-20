@@ -10,6 +10,19 @@ list(APPEND tests
 foreach(test IN LISTS tests)
   add_executable(${test} ${test}.c)
 
+  set_target_properties(
+    ${test}
+    PROPERTIES
+    C_STANDARD 23
+  )
+
+  # Asserts are the test; strip the NDEBUG that release flags define
+  target_compile_options(
+    ${test}
+    PRIVATE
+      -UNDEBUG
+  )
+
   target_link_libraries(
     ${test}
     PRIVATE

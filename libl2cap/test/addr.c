@@ -1,6 +1,3 @@
-// Asserts are the test; keep them in every build type
-#undef NDEBUG
-
 #include <assert.h>
 #include <string.h>
 

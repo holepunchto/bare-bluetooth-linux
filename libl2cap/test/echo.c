@@ -1,6 +1,3 @@
-// Asserts are the test; keep them in every build type
-#undef NDEBUG
-
 // The state machine does not care that the descriptor is Bluetooth: a Unix
 // SOCK_SEQPACKET socketpair has the same semantics (atomic SDUs, EAGAIN, EOF),
 // so the whole read/write/close path is testable without an adapter.
@@ -18,9 +15,7 @@ static size_t received_len = 0;
 static int eof_seen = 0;
 
 static void
-on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
-  (void) channel;
-
+on_read(l2cap_channel_t *, size_t len, const uint8_t *data) {
   if (len == 0) {
     eof_seen = 1;
     return;
@@ -66,7 +61,7 @@ main(void) {
   assert(l2cap_channel_read_start(&b, on_read) == 0);
 
   const uint8_t msg[] = "hello over l2cap";
-  assert(l2cap_channel_write(&a, msg, sizeof(msg), NULL) == 0);
+  assert(l2cap_channel_write(&a, msg, sizeof(msg), NULL) == L2CAP_WRITE_SENT);
 
   pump(&b);
   assert(received_len == sizeof(msg));

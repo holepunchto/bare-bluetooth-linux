@@ -58,19 +58,19 @@ struct l2cap_channel_s {
   void *data;
 
   // Private
-  int fd;
-  int state;
-  int reading;
-  uint16_t psm;
-  uint16_t rcv_mtu;
-  uint16_t snd_mtu;
-  l2cap_addr_t peer;
-  uint8_t *read_buf;
-  l2cap_connect_cb on_connect;
-  l2cap_read_cb on_read;
-  l2cap_drain_cb on_drain;
-  l2cap_chunk_t *write_head;
-  l2cap_chunk_t *write_tail;
+  int _fd;
+  int _state;
+  int _reading;
+  uint16_t _psm;
+  uint16_t _rcv_mtu;
+  uint16_t _snd_mtu;
+  l2cap_addr_t _peer;
+  uint8_t *_read_buf;
+  l2cap_connect_cb _on_connect;
+  l2cap_read_cb _on_read;
+  l2cap_drain_cb _on_drain;
+  l2cap_chunk_t *_write_head;
+  l2cap_chunk_t *_write_tail;
 };
 
 /**
@@ -113,7 +113,10 @@ int
 l2cap_channel_fd(const l2cap_channel_t *channel);
 
 /**
- * The readiness bits the channel currently needs, or 0 when it needs none.
+ * The caller's side of the event-loop contract: register the returned bits
+ * as the poll interest for `l2cap_channel_fd()`, and re-query after every
+ * call that changes the channel (process, write, read_start/stop, close).
+ * Returns 0 when the descriptor needs no watching at all.
  */
 int
 l2cap_channel_events(const l2cap_channel_t *channel);
@@ -132,10 +135,16 @@ l2cap_channel_read_start(l2cap_channel_t *channel, l2cap_read_cb cb);
 int
 l2cap_channel_read_stop(l2cap_channel_t *channel);
 
+/** `l2cap_channel_write()` handed the SDU to the kernel. */
+#define L2CAP_WRITE_SENT 0
+
+/** `l2cap_channel_write()` queued the SDU; the drain callback fires once the
+ * queue empties. */
+#define L2CAP_WRITE_QUEUED 1
+
 /**
- * Send one SDU of at most `l2cap_channel_snd_mtu()` bytes. Returns 0 when
- * fully handed to the kernel, 1 when queued (`cb` fires once the queue
- * drains), or a negated errno.
+ * Send one SDU of at most `l2cap_channel_snd_mtu()` bytes. Returns
+ * `L2CAP_WRITE_SENT`, `L2CAP_WRITE_QUEUED`, or a negated errno.
  */
 int
 l2cap_channel_write(l2cap_channel_t *channel, const uint8_t *data, size_t len, l2cap_drain_cb cb);

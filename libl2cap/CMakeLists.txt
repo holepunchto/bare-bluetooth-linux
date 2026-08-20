@@ -20,7 +20,7 @@ target_sources(
   INTERFACE
     include/l2cap.h
   PRIVATE
-    src/linux.c
+    src/l2cap.c
 )
 
 target_include_directories(

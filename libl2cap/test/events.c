@@ -1,6 +1,3 @@
-// Asserts are the test; keep them in every build type
-#undef NDEBUG
-
 // events() must track the channel state exactly: nothing when idle or newly
 // open, READABLE while reading, WRITABLE while the queue is non-empty,
 // nothing once closed.
@@ -13,11 +10,7 @@
 #include <l2cap.h>
 
 static void
-on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
-  (void) channel;
-  (void) len;
-  (void) data;
-}
+on_read(l2cap_channel_t *, size_t, const uint8_t *) {}
 
 int
 main(void) {
@@ -46,11 +39,11 @@ main(void) {
 
   int r = 0;
   int sent = 0;
-  while ((r = l2cap_channel_write(&a, msg, sizeof(msg), NULL)) == 0) {
+  while ((r = l2cap_channel_write(&a, msg, sizeof(msg), NULL)) == L2CAP_WRITE_SENT) {
     sent++;
     assert(sent < 10000);
   }
-  assert(r == 1);
+  assert(r == L2CAP_WRITE_QUEUED);
   assert(l2cap_channel_events(&a) == L2CAP_WRITABLE);
 
   assert(l2cap_channel_read_start(&a, on_read) == 0);

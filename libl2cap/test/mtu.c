@@ -1,6 +1,3 @@
-// Asserts are the test; keep them in every build type
-#undef NDEBUG
-
 // An SDU larger than the send MTU must be rejected up front with EMSGSIZE,
 // never queued and never fatal to the channel.
 
@@ -23,15 +20,14 @@ main(void) {
   uint16_t mtu = l2cap_channel_snd_mtu(&a);
   assert(mtu > 0);
 
-  uint8_t msg[65536];
+  uint8_t msg[65536]; // larger than any uint16_t MTU by construction
   memset(msg, 0xab, sizeof(msg));
-  assert(sizeof(msg) > mtu);
 
   assert(l2cap_channel_write(&a, msg, mtu + 1, NULL) == -EMSGSIZE);
   assert((l2cap_channel_events(&a) & L2CAP_WRITABLE) == 0); // nothing queued
 
   // The channel survives and still accepts a conforming SDU
-  assert(l2cap_channel_write(&a, msg, mtu, NULL) == 0);
+  assert(l2cap_channel_write(&a, msg, mtu, NULL) == L2CAP_WRITE_SENT);
 
   l2cap_channel_close(&a);
 
