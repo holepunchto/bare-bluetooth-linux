@@ -2,6 +2,9 @@ list(APPEND tests
   addr
   echo
   backpressure
+  reentrant-close
+  mtu
+  events
 )
 
 foreach(test IN LISTS tests)
@@ -10,7 +13,7 @@ foreach(test IN LISTS tests)
   target_link_libraries(
     ${test}
     PRIVATE
-      l2cap
+      l2cap_static
   )
 
   add_test(

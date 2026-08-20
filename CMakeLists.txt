@@ -8,22 +8,11 @@ project(bare_bluetooth_linux C CXX)
 
 fetch_package("github:holepunchto/libjstl#ca590d6")
 
-add_library(l2cap STATIC libl2cap/src/linux.c)
+enable_testing()
 
-harden(l2cap)
+set(L2CAP_ENABLE_TESTS ON)
 
-set_target_properties(
-  l2cap
-  PROPERTIES
-  C_STANDARD 99
-  POSITION_INDEPENDENT_CODE ON
-)
-
-target_include_directories(
-  l2cap
-  PUBLIC
-    libl2cap/include
-)
+add_subdirectory(libl2cap)
 
 add_bare_module(bare_bluetooth_linux)
 
@@ -48,12 +37,6 @@ target_link_libraries(
   ${bare_bluetooth_linux}
   PRIVATE
     jstl
-    l2cap
+    l2cap_static
     ${DBUS_LIBRARIES}
 )
-
-if(PROJECT_IS_TOP_LEVEL)
-  enable_testing()
-
-  add_subdirectory(libl2cap/test)
-endif()

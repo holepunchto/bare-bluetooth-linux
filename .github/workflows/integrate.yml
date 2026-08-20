@@ -32,4 +32,5 @@ jobs:
           platform: ${{ matrix.platform }}
           arch: ${{ matrix.arch }}
           flags: --debug
+      - run: ctest --test-dir build --output-on-failure
       - run: npm test

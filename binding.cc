@@ -2628,6 +2628,11 @@ static void
 bare_bluetooth_linux_l2cap__close(bare_bluetooth_linux_l2cap_t *ch) {
   if (ch->closing || ch->closed) return;
   ch->closing = true;
+
+  // The actual close is deferred to the uv callback; stop the library's read
+  // loop now so no more data is emitted in between
+  l2cap_channel_read_stop(&ch->channel);
+
   uv_close(reinterpret_cast<uv_handle_t *>(&ch->poll), bare_bluetooth_linux_l2cap__on_poll_close);
 }
 
@@ -2801,7 +2806,8 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   new (ch) bare_bluetooth_linux_l2cap_t();
 
   ch->env = env;
-  ch->channel.data = ch;
+
+  l2cap_channel_init(&ch->channel, ch);
 
   int res = l2cap_channel_connect(&ch->channel, &local_addr, &peer_addr, static_cast<uint16_t>(psm), bare_bluetooth_linux_l2cap__on_connect);
   if (res < 0) {
@@ -2891,14 +2897,17 @@ bare_bluetooth_linux_l2cap_open(
   bare_bluetooth_linux_l2cap__emit(&*ch, ch->on_open);
 }
 
-static uint32_t
+// Returns the library's contract to JS: 0 sent, 1 queued (the drain callback
+// fires later), negative on error. Errors carry their errno detail through the
+// 'error' event and are fatal to the channel.
+static int32_t
 bare_bluetooth_linux_l2cap_write(
   js_env_t *env,
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_t, 1> ch,
   js_typedarray_t<uint8_t> buf
 ) {
-  if (!ch->opened || ch->closing || ch->closed) return 0;
+  if (!ch->opened || ch->closing || ch->closed) return -1;
 
   uint8_t *data;
   size_t len;
@@ -2906,11 +2915,16 @@ bare_bluetooth_linux_l2cap_write(
   assert(err == 0);
 
   int res = l2cap_channel_write(&ch->channel, data, len, bare_bluetooth_linux_l2cap__on_channel_drain);
-  if (res < 0) return 0;
+
+  if (res < 0) {
+    bare_bluetooth_linux_l2cap__emit(&*ch, ch->on_error, std::string(strerror(-res)));
+    bare_bluetooth_linux_l2cap__close(&*ch);
+    return res;
+  }
 
   bare_bluetooth_linux_l2cap__update_poll(&*ch);
 
-  return static_cast<uint32_t>(len);
+  return res;
 }
 
 static void

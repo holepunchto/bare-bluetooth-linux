@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../include/l2cap.h"
+#include <l2cap.h>
 
 static char received[64];
 static size_t received_len = 0;
@@ -19,6 +19,8 @@ static int eof_seen = 0;
 
 static void
 on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
+  (void) channel;
+
   if (len == 0) {
     eof_seen = 1;
     return;
@@ -46,7 +48,8 @@ pump(l2cap_channel_t *channel) {
   if (p.revents & (POLLIN | POLLHUP)) fired |= L2CAP_READABLE;
   if (p.revents & (POLLOUT | POLLERR)) fired |= L2CAP_WRITABLE;
 
-  assert(l2cap_channel_process(channel, fired) == 0);
+  int err = l2cap_channel_process(channel, fired);
+  assert(err == 0);
 }
 
 int
@@ -55,6 +58,8 @@ main(void) {
   assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds) == 0);
 
   l2cap_channel_t a, b;
+  l2cap_channel_init(&a, NULL);
+  l2cap_channel_init(&b, NULL);
   assert(l2cap_channel_accept(&a, fds[0]) == 0);
   assert(l2cap_channel_accept(&b, fds[1]) == 0);
 

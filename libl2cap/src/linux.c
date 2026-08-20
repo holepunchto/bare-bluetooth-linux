@@ -1,3 +1,4 @@
+#include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -6,7 +7,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../include/l2cap.h"
+#include <l2cap.h>
 
 // The kernel exposes no uapi headers for Bluetooth; these definitions are the
 // stable socket ABI normally shipped by the BlueZ userspace headers.
@@ -19,6 +20,9 @@
 #endif
 #ifndef SOL_BLUETOOTH
 #define SOL_BLUETOOTH 274
+#endif
+#ifndef BT_SNDMTU
+#define BT_SNDMTU 12
 #endif
 #ifndef BT_RCVMTU
 #define BT_RCVMTU 13
@@ -35,6 +39,10 @@ struct l2cap_sockaddr_l2 {
   uint8_t l2_bdaddr_type;
 };
 
+// The kernel ABI this struct redeclares is frozen; catch any drift at compile
+// time (C99 has no static_assert)
+typedef char l2cap_sockaddr_l2_size_check[sizeof(struct l2cap_sockaddr_l2) == 14 ? 1 : -1];
+
 struct l2cap_chunk_s {
   l2cap_chunk_t *next;
   size_t len;
@@ -49,17 +57,28 @@ enum {
   L2CAP_STATE_CLOSED,
 };
 
+static int
+l2cap__hexval(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
 int
 l2cap_addr_init(const char *str, uint8_t type, l2cap_addr_t *addr) {
   if (strlen(str) != 17) return -EINVAL;
 
   // bdaddr_t is little-endian: byte 0 is the last octet of the string
   for (int i = 0; i < 6; i++) {
-    const char *at = str + (5 - i) * 3;
-    char *end;
-    long value = strtol(at, &end, 16);
-    if (end != at + 2 || value < 0 || value > 255) return -EINVAL;
-    addr->bdaddr[i] = (uint8_t) value;
+    const char *at = str + i * 3;
+
+    int hi = l2cap__hexval(at[0]);
+    int lo = l2cap__hexval(at[1]);
+    if (hi < 0 || lo < 0) return -EINVAL;
+    if (i < 5 && at[2] != ':') return -EINVAL;
+
+    addr->bdaddr[5 - i] = (uint8_t) (hi << 4 | lo);
   }
 
   addr->type = type;
@@ -67,31 +86,48 @@ l2cap_addr_init(const char *str, uint8_t type, l2cap_addr_t *addr) {
   return 0;
 }
 
-int
+void
 l2cap_addr_to_string(const l2cap_addr_t *addr, char *str) {
   const uint8_t *b = addr->bdaddr;
   snprintf(str, 18, "%02X:%02X:%02X:%02X:%02X:%02X", b[5], b[4], b[3], b[2], b[1], b[0]);
-  return 0;
 }
 
-static void
+void
+l2cap_channel_init(l2cap_channel_t *channel, void *data) {
+  memset(channel, 0, sizeof(*channel));
+  channel->data = data;
+  channel->fd = -1;
+}
+
+static int
 l2cap_channel__opened(l2cap_channel_t *channel) {
   uint16_t mtu = 0;
   socklen_t len = sizeof(mtu);
   if (getsockopt(channel->fd, SOL_BLUETOOTH, BT_RCVMTU, &mtu, &len) != 0 || mtu == 0) {
     mtu = L2CAP_DEFAULT_MTU;
   }
+  channel->rcv_mtu = mtu;
 
-  channel->mtu = mtu;
-  channel->read_buf = malloc(mtu);
-  channel->state = channel->read_buf ? L2CAP_STATE_OPEN : L2CAP_STATE_FAILED;
+  mtu = 0;
+  len = sizeof(mtu);
+  if (getsockopt(channel->fd, SOL_BLUETOOTH, BT_SNDMTU, &mtu, &len) != 0 || mtu == 0) {
+    mtu = L2CAP_DEFAULT_MTU;
+  }
+  channel->snd_mtu = mtu;
+
+  channel->read_buf = malloc(channel->rcv_mtu);
+  if (channel->read_buf == NULL) {
+    channel->state = L2CAP_STATE_FAILED;
+    return -ENOMEM;
+  }
+
+  channel->state = L2CAP_STATE_OPEN;
+
+  return 0;
 }
 
 int
 l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const l2cap_addr_t *peer, uint16_t psm, l2cap_connect_cb cb) {
-  memset(&channel->fd, 0, sizeof(*channel) - offsetof(l2cap_channel_t, fd));
-  channel->fd = -1;
-
   int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_L2CAP);
   if (fd < 0) return -errno;
 
@@ -110,7 +146,7 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
   struct l2cap_sockaddr_l2 peer_addr;
   memset(&peer_addr, 0, sizeof(peer_addr));
   peer_addr.l2_family = AF_BLUETOOTH;
-  peer_addr.l2_psm = psm; // Little-endian on every platform Linux Bluetooth supports
+  peer_addr.l2_psm = htole16(psm);
   peer_addr.l2_bdaddr_type = peer->type;
   memcpy(peer_addr.l2_bdaddr, peer->bdaddr, 6);
 
@@ -131,16 +167,37 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
 
 int
 l2cap_channel_accept(l2cap_channel_t *channel, int fd) {
-  memset(&channel->fd, 0, sizeof(*channel) - offsetof(l2cap_channel_t, fd));
-  channel->fd = -1;
-
   int flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return -errno;
+  if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    int err = errno;
+    close(fd);
+    return -err;
+  }
+
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
 
   channel->fd = fd;
 
-  l2cap_channel__opened(channel);
-  if (channel->state != L2CAP_STATE_OPEN) return -ENOMEM;
+  // A Bluetooth descriptor carries its endpoints; other families (e.g. the
+  // Unix socketpairs used in tests) leave them zeroed
+  struct l2cap_sockaddr_l2 addr;
+  socklen_t len = sizeof(addr);
+  if (getpeername(fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
+    memcpy(channel->peer.bdaddr, addr.l2_bdaddr, 6);
+    channel->peer.type = addr.l2_bdaddr_type;
+  }
+
+  len = sizeof(addr);
+  if (getsockname(fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
+    channel->psm = le16toh(addr.l2_psm);
+  }
+
+  int err = l2cap_channel__opened(channel);
+  if (err < 0) {
+    close(fd);
+    channel->fd = -1;
+    return err;
+  }
 
   return 0;
 }
@@ -193,14 +250,13 @@ l2cap_channel_process(l2cap_channel_t *channel, int events) {
     socklen_t len = sizeof(err);
     if (getsockopt(channel->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
 
+    if (err == 0 && l2cap_channel__opened(channel) < 0) err = ENOMEM;
+
     if (err) {
       channel->state = L2CAP_STATE_FAILED;
       channel->on_connect(channel, -err);
       return 0;
     }
-
-    l2cap_channel__opened(channel);
-    if (channel->state != L2CAP_STATE_OPEN) return -ENOMEM;
 
     channel->on_connect(channel, 0);
   }
@@ -215,7 +271,7 @@ l2cap_channel_process(l2cap_channel_t *channel, int events) {
 
   if (events & L2CAP_READABLE) {
     while (channel->reading && channel->state == L2CAP_STATE_OPEN) {
-      ssize_t n = recv(channel->fd, channel->read_buf, channel->mtu, MSG_DONTWAIT);
+      ssize_t n = recv(channel->fd, channel->read_buf, channel->rcv_mtu, MSG_DONTWAIT);
       if (n > 0) {
         channel->on_read(channel, (size_t) n, channel->read_buf);
       } else if (n == 0) {
@@ -252,6 +308,7 @@ int
 l2cap_channel_write(l2cap_channel_t *channel, const uint8_t *data, size_t len, l2cap_drain_cb cb) {
   if (channel->state != L2CAP_STATE_OPEN) return -ENOTCONN;
   if (len == 0) return 0;
+  if (len > channel->snd_mtu) return -EMSGSIZE;
 
   if (channel->write_head == NULL) {
     if (send(channel->fd, data, len, MSG_DONTWAIT | MSG_NOSIGNAL) >= 0) return 0;
@@ -281,7 +338,12 @@ l2cap_channel_psm(const l2cap_channel_t *channel) {
 
 uint16_t
 l2cap_channel_mtu(const l2cap_channel_t *channel) {
-  return channel->mtu;
+  return channel->rcv_mtu;
+}
+
+uint16_t
+l2cap_channel_snd_mtu(const l2cap_channel_t *channel) {
+  return channel->snd_mtu;
 }
 
 const l2cap_addr_t *
@@ -292,6 +354,8 @@ l2cap_channel_peer(const l2cap_channel_t *channel) {
 void
 l2cap_channel_close(l2cap_channel_t *channel) {
   if (channel->state == L2CAP_STATE_CLOSED) return;
+
+  channel->reading = 0;
 
   if (channel->fd >= 0) close(channel->fd);
   channel->fd = -1;

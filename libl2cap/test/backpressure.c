@@ -10,12 +10,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../include/l2cap.h"
+#include <l2cap.h>
 
 static int drained = 0;
 
 static void
 on_drain(l2cap_channel_t *channel) {
+  (void) channel;
   drained++;
 }
 
@@ -28,12 +29,15 @@ main(void) {
   assert(setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) == 0);
 
   l2cap_channel_t a;
+  l2cap_channel_init(&a, NULL);
   assert(l2cap_channel_accept(&a, fds[0]) == 0);
 
   uint8_t msg[512];
   memset(msg, 0xab, sizeof(msg));
 
-  // Write until the kernel pushes back and the chunk gets queued
+  // Write until the kernel pushes back and the chunk gets queued. The bound
+  // only guards against EAGAIN never arriving: the buffers involved hold a
+  // few KB, orders of magnitude less than the bound allows.
   int r = 0;
   int sent = 0;
   while ((r = l2cap_channel_write(&a, msg, sizeof(msg), on_drain)) == 0) {

@@ -25,13 +25,17 @@ typedef struct l2cap_chunk_s l2cap_chunk_t;
 
 /**
  * The result of a `l2cap_channel_connect()`. `status` is 0 on success or a
- * negated errno on failure; a failed channel must still be closed.
+ * negated errno on failure; a failed channel must still be closed. The
+ * callback fires exactly once.
  */
 typedef void (*l2cap_connect_cb)(l2cap_channel_t *channel, int status);
 
 /**
- * An inbound SDU. `len == 0` means the peer closed the channel. The buffer is
- * owned by the channel and only valid for the duration of the call.
+ * An inbound SDU. `len == 0` means the channel ended. The buffer is owned by
+ * the channel and only valid for the duration of the call.
+ *
+ * Caveat: SOCK_SEQPACKET cannot distinguish a zero-length SDU from EOF; both
+ * are reported as `len == 0`.
  */
 typedef void (*l2cap_read_cb)(l2cap_channel_t *channel, size_t len, const uint8_t *data);
 
@@ -46,8 +50,9 @@ struct l2cap_addr_s {
 };
 
 /**
- * A connection-oriented channel. Allocate it yourself; every field except
- * `data` is private.
+ * A connection-oriented channel. Allocate it yourself and initialise it with
+ * `l2cap_channel_init()` before any other call; every field except `data` is
+ * private.
  */
 struct l2cap_channel_s {
   void *data;
@@ -57,7 +62,8 @@ struct l2cap_channel_s {
   int state;
   int reading;
   uint16_t psm;
-  uint16_t mtu;
+  uint16_t rcv_mtu;
+  uint16_t snd_mtu;
   l2cap_addr_t peer;
   uint8_t *read_buf;
   l2cap_connect_cb on_connect;
@@ -76,8 +82,15 @@ l2cap_addr_init(const char *str, uint8_t type, l2cap_addr_t *addr);
 /**
  * Format an address back into `str`, which must hold at least 18 bytes.
  */
-int
+void
 l2cap_addr_to_string(const l2cap_addr_t *addr, char *str);
+
+/**
+ * Initialise a channel. `data` is the caller's opaque pointer, available on
+ * every callback via `channel->data`.
+ */
+void
+l2cap_channel_init(l2cap_channel_t *channel, void *data);
 
 /**
  * Start a non-blocking connect to `peer` on `psm`, bound to the `local`
@@ -90,7 +103,8 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
 
 /**
  * Adopt an already-connected SOCK_SEQPACKET descriptor. The channel takes
- * ownership and switches it to non-blocking mode.
+ * ownership of `fd` in every case — on failure the descriptor is closed —
+ * and switches it to non-blocking, close-on-exec mode.
  */
 int
 l2cap_channel_accept(l2cap_channel_t *channel, int fd);
@@ -119,8 +133,9 @@ int
 l2cap_channel_read_stop(l2cap_channel_t *channel);
 
 /**
- * Send one SDU. Returns 0 when fully handed to the kernel, 1 when queued
- * (`cb` fires once the queue drains), or a negated errno.
+ * Send one SDU of at most `l2cap_channel_snd_mtu()` bytes. Returns 0 when
+ * fully handed to the kernel, 1 when queued (`cb` fires once the queue
+ * drains), or a negated errno.
  */
 int
 l2cap_channel_write(l2cap_channel_t *channel, const uint8_t *data, size_t len, l2cap_drain_cb cb);
@@ -130,6 +145,9 @@ l2cap_channel_psm(const l2cap_channel_t *channel);
 
 uint16_t
 l2cap_channel_mtu(const l2cap_channel_t *channel);
+
+uint16_t
+l2cap_channel_snd_mtu(const l2cap_channel_t *channel);
 
 const l2cap_addr_t *
 l2cap_channel_peer(const l2cap_channel_t *channel);
