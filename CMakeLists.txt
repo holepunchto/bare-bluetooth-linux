@@ -8,9 +8,11 @@ project(bare_bluetooth_linux C CXX)
 
 fetch_package("github:holepunchto/libjstl#ca590d6")
 
-enable_testing()
+if(PROJECT_IS_TOP_LEVEL)
+  enable_testing()
 
-set(L2CAP_ENABLE_TESTS ON)
+  set(L2CAP_ENABLE_TESTS ON)
+endif()
 
 add_subdirectory(libl2cap)
 

@@ -3,6 +3,7 @@
 // nothing once closed.
 
 #include <assert.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -10,7 +11,11 @@
 #include <l2cap.h>
 
 static void
-on_read(l2cap_channel_t *, size_t, const uint8_t *) {}
+on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
+  (void) channel;
+  (void) len;
+  (void) data;
+}
 
 int
 main(void) {
@@ -20,6 +25,11 @@ main(void) {
   l2cap_channel_t a;
   l2cap_channel_init(&a, NULL);
   assert(l2cap_channel_events(&a) == 0); // idle
+
+  // Nothing works before the channel is open
+  uint8_t byte = 0xab;
+  assert(l2cap_channel_write(&a, &byte, 1, NULL) == -ENOTCONN);
+  assert(l2cap_channel_read_start(&a, on_read) == -ENOTCONN);
 
   assert(l2cap_channel_accept(&a, fds[0]) == 0);
   assert(l2cap_channel_events(&a) == 0); // open, not reading, nothing queued

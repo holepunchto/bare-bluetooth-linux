@@ -15,7 +15,9 @@ static size_t received_len = 0;
 static int eof_seen = 0;
 
 static void
-on_read(l2cap_channel_t *, size_t len, const uint8_t *data) {
+on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
+  (void) channel;
+
   if (len == 0) {
     eof_seen = 1;
     return;

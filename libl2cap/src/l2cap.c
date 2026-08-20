@@ -1,6 +1,11 @@
+// htole16/le16toh live behind _DEFAULT_SOURCE; define it here so the build
+// does not depend on the consumer's CMake extension settings
+#define _DEFAULT_SOURCE
+
 #include <endian.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,9 +44,16 @@ struct l2cap_sockaddr_l2 {
   uint8_t l2_bdaddr_type;
 };
 
-// The kernel ABI this struct redeclares is frozen; catch any drift at compile
-// time (C99 has no static_assert)
+// The kernel ABI this struct redeclares is frozen; catch any drift — size or
+// field order — at compile time (C99 has no static_assert)
 typedef char l2cap_sockaddr_l2_size_check[sizeof(struct l2cap_sockaddr_l2) == 14 ? 1 : -1];
+typedef char l2cap_sockaddr_l2_layout_check
+  [offsetof(struct l2cap_sockaddr_l2, l2_psm) == 2 &&
+       offsetof(struct l2cap_sockaddr_l2, l2_bdaddr) == 4 &&
+       offsetof(struct l2cap_sockaddr_l2, l2_cid) == 10 &&
+       offsetof(struct l2cap_sockaddr_l2, l2_bdaddr_type) == 12
+     ? 1
+     : -1];
 
 struct l2cap_chunk_s {
   l2cap_chunk_t *next;
@@ -128,21 +140,22 @@ l2cap_channel__opened(l2cap_channel_t *channel) {
 }
 
 // A Bluetooth descriptor carries its endpoints; other families (e.g. the Unix
-// socketpairs used in tests) leave them zeroed
+// socketpairs used in tests) leave them zeroed. The kernel fills the PSM on
+// the peer name too, so one getpeername returns bdaddr, type and PSM at once —
+// and unlike getsockname's sport, that PSM is correct for accepted channels.
 static void
 l2cap_channel__fill_endpoints(l2cap_channel_t *channel) {
   struct l2cap_sockaddr_l2 addr;
   socklen_t len = sizeof(addr);
 
-  if (getpeername(channel->_fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
-    memcpy(channel->_peer.bdaddr, addr.l2_bdaddr, sizeof(addr.l2_bdaddr));
-    channel->_peer.type = addr.l2_bdaddr_type;
-  }
+  memset(&addr, 0, sizeof(addr));
 
-  len = sizeof(addr);
-  if (getsockname(channel->_fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
-    channel->_psm = le16toh(addr.l2_psm);
-  }
+  if (getpeername(channel->_fd, (struct sockaddr *) &addr, &len) != 0) return;
+  if (addr.l2_family != AF_BLUETOOTH) return;
+
+  memcpy(channel->_peer.bdaddr, addr.l2_bdaddr, sizeof(addr.l2_bdaddr));
+  channel->_peer.type = addr.l2_bdaddr_type;
+  channel->_psm = le16toh(addr.l2_psm);
 }
 
 int
@@ -354,7 +367,7 @@ l2cap_channel_psm(const l2cap_channel_t *channel) {
 }
 
 uint16_t
-l2cap_channel_mtu(const l2cap_channel_t *channel) {
+l2cap_channel_rcv_mtu(const l2cap_channel_t *channel) {
   return channel->_rcv_mtu;
 }
 
@@ -373,6 +386,7 @@ l2cap_channel_close(l2cap_channel_t *channel) {
   if (channel->_state == L2CAP_STATE_CLOSED) return;
 
   channel->_reading = 0;
+  channel->_on_drain = NULL; // pending writes are discarded; no drain after close
 
   if (channel->_fd >= 0) close(channel->_fd);
   channel->_fd = -1;

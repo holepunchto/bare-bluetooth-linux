@@ -3,6 +3,7 @@ list(APPEND tests
   echo
   backpressure
   reentrant-close
+  drain-after-close
   mtu
   events
 )
@@ -13,7 +14,7 @@ foreach(test IN LISTS tests)
   set_target_properties(
     ${test}
     PROPERTIES
-    C_STANDARD 23
+    C_STANDARD 99
   )
 
   # Asserts are the test; strip the NDEBUG that release flags define

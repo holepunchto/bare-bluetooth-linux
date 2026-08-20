@@ -1,6 +1,11 @@
 #ifndef L2CAP_H
 #define L2CAP_H
 
+// Linux-only: this library wraps the kernel's AF_BLUETOOTH sockets and its
+// constants are raw Linux ABI values. Other platforms expose L2CAP through
+// entirely different APIs (CoreBluetooth, BluetoothSocket) and are out of
+// scope.
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,7 +45,8 @@ typedef void (*l2cap_connect_cb)(l2cap_channel_t *channel, int status);
 typedef void (*l2cap_read_cb)(l2cap_channel_t *channel, size_t len, const uint8_t *data);
 
 /**
- * The write queue drained after `l2cap_channel_write()` returned 1.
+ * The write queue drained after `l2cap_channel_write()` returned
+ * `L2CAP_WRITE_QUEUED`. Never fires after `l2cap_channel_close()`.
  */
 typedef void (*l2cap_drain_cb)(l2cap_channel_t *channel);
 
@@ -115,8 +121,9 @@ l2cap_channel_fd(const l2cap_channel_t *channel);
 /**
  * The caller's side of the event-loop contract: register the returned bits
  * as the poll interest for `l2cap_channel_fd()`, and re-query after every
- * call that changes the channel (process, write, read_start/stop, close).
- * Returns 0 when the descriptor needs no watching at all.
+ * call that changes the channel (connect, accept, process, write,
+ * read_start/stop, close). Returns 0 when the descriptor needs no watching
+ * at all.
  */
 int
 l2cap_channel_events(const l2cap_channel_t *channel);
@@ -153,7 +160,7 @@ uint16_t
 l2cap_channel_psm(const l2cap_channel_t *channel);
 
 uint16_t
-l2cap_channel_mtu(const l2cap_channel_t *channel);
+l2cap_channel_rcv_mtu(const l2cap_channel_t *channel);
 
 uint16_t
 l2cap_channel_snd_mtu(const l2cap_channel_t *channel);
@@ -163,7 +170,10 @@ l2cap_channel_peer(const l2cap_channel_t *channel);
 
 /**
  * Close the descriptor and free the channel's internal buffers. Synchronous
- * and idempotent; the channel struct itself is the caller's to reclaim.
+ * and idempotent. Pending queued writes are discarded and the drain callback
+ * never fires after close — the caller settles its own bookkeeping. The
+ * struct is the caller's to reclaim; reusing it requires a fresh
+ * `l2cap_channel_init()`.
  */
 void
 l2cap_channel_close(l2cap_channel_t *channel);

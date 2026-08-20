@@ -12,7 +12,8 @@
 static int drained = 0;
 
 static void
-on_drain(l2cap_channel_t *) {
+on_drain(l2cap_channel_t *channel) {
+  (void) channel;
   drained++;
 }
 
@@ -58,6 +59,7 @@ main(void) {
   assert((l2cap_channel_events(&a) & L2CAP_WRITABLE) == 0);
 
   l2cap_channel_close(&a);
+  close(fds[1]);
 
   return 0;
 }

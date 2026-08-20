@@ -11,7 +11,10 @@
 static int reads = 0;
 
 static void
-on_read(l2cap_channel_t *channel, size_t, const uint8_t *) {
+on_read(l2cap_channel_t *channel, size_t len, const uint8_t *data) {
+  (void) len;
+  (void) data;
+
   reads++;
   l2cap_channel_close(channel);
 }

@@ -3,8 +3,10 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include <l2cap.h>
 
@@ -20,8 +22,9 @@ main(void) {
   uint16_t mtu = l2cap_channel_snd_mtu(&a);
   assert(mtu > 0);
 
-  uint8_t msg[65536]; // larger than any uint16_t MTU by construction
-  memset(msg, 0xab, sizeof(msg));
+  uint8_t *msg = malloc(mtu + 1);
+  assert(msg != NULL);
+  memset(msg, 0xab, mtu + 1);
 
   assert(l2cap_channel_write(&a, msg, mtu + 1, NULL) == -EMSGSIZE);
   assert((l2cap_channel_events(&a) & L2CAP_WRITABLE) == 0); // nothing queued
@@ -29,7 +32,9 @@ main(void) {
   // The channel survives and still accepts a conforming SDU
   assert(l2cap_channel_write(&a, msg, mtu, NULL) == L2CAP_WRITE_SENT);
 
+  free(msg);
   l2cap_channel_close(&a);
+  close(fds[1]);
 
   return 0;
 }
