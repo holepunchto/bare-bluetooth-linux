@@ -51,6 +51,7 @@ struct l2cap_sockaddr_l2 {
 // The kernel ABI this struct redeclares is frozen; catch any drift — size or
 // field order — at compile time (C99 has no static_assert)
 typedef char l2cap_sockaddr_l2_size_check[sizeof(struct l2cap_sockaddr_l2) == 14 ? 1 : -1];
+
 typedef char l2cap_sockaddr_l2_layout_check
   [offsetof(struct l2cap_sockaddr_l2, l2_psm) == 2 &&
        offsetof(struct l2cap_sockaddr_l2, l2_bdaddr) == 4 &&

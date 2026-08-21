@@ -121,6 +121,10 @@ l2cap_channel_init(l2cap_channel_t *channel, void *data);
  * call it between `l2cap_channel_init()` and `l2cap_channel_connect()`.
  * Without it the kernel default (low) applies. Channels accepted from a
  * server inherit the server's level.
+ *
+ * Low stays the default on purpose: medium and above require pairing, so
+ * forcing them would refuse every unauthenticated peer. The caller knows
+ * whether its use case can pair; the library does not.
  */
 int
 l2cap_channel_set_security(l2cap_channel_t *channel, uint8_t level);

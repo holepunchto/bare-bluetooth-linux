@@ -42,6 +42,7 @@ main(void) {
     assert(sent < 10000);
   }
   assert(r == L2CAP_WRITE_QUEUED);
+  assert(drained == 0); // queued, not yet drained
   assert(l2cap_channel_events(&a) & L2CAP_WRITABLE);
 
   // Drain the peer side, then let the channel flush
