@@ -24,6 +24,22 @@ extern "C" {
 #define L2CAP_READABLE 0x1
 #define L2CAP_WRITABLE 0x2
 
+/** `l2cap_channel_write()` handed the SDU to the kernel. */
+#define L2CAP_WRITE_SENT 0
+
+/** `l2cap_channel_write()` queued the SDU; the drain callback fires once the
+ * queue empties. */
+#define L2CAP_WRITE_QUEUED 1
+
+/**
+ * Levels for `l2cap_channel_set_security()` and `l2cap_server_set_security()`,
+ * matching the kernel's BT_SECURITY_* values.
+ */
+#define L2CAP_SECURITY_LOW    0x01
+#define L2CAP_SECURITY_MEDIUM 0x02
+#define L2CAP_SECURITY_HIGH   0x03
+#define L2CAP_SECURITY_FIPS   0x04
+
 typedef struct l2cap_addr_s l2cap_addr_t;
 typedef struct l2cap_channel_s l2cap_channel_t;
 typedef struct l2cap_chunk_s l2cap_chunk_t;
@@ -101,15 +117,6 @@ void
 l2cap_channel_init(l2cap_channel_t *channel, void *data);
 
 /**
- * Levels for `l2cap_channel_set_security()` and `l2cap_server_set_security()`,
- * matching the kernel's BT_SECURITY_* values.
- */
-#define L2CAP_SECURITY_LOW    0x01
-#define L2CAP_SECURITY_MEDIUM 0x02
-#define L2CAP_SECURITY_HIGH   0x03
-#define L2CAP_SECURITY_FIPS   0x04
-
-/**
  * Require a security level for the link, applied when the socket is created —
  * call it between `l2cap_channel_init()` and `l2cap_channel_connect()`.
  * Without it the kernel default (low) applies. Channels accepted from a
@@ -130,8 +137,8 @@ l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const
 /**
  * Adopt an already-connected SOCK_SEQPACKET descriptor into an initialised,
  * idle channel — anything else is -EINVAL. The channel takes ownership of
- * `fd` in every case — on failure the descriptor is closed — and switches it
- * to non-blocking, close-on-exec mode.
+ * `fd` in every case: on failure the descriptor is closed, on success it is
+ * switched to non-blocking, close-on-exec mode.
  */
 int
 l2cap_channel_accept(l2cap_channel_t *channel, int fd);
@@ -162,13 +169,6 @@ l2cap_channel_read_start(l2cap_channel_t *channel, l2cap_read_cb cb);
 
 int
 l2cap_channel_read_stop(l2cap_channel_t *channel);
-
-/** `l2cap_channel_write()` handed the SDU to the kernel. */
-#define L2CAP_WRITE_SENT 0
-
-/** `l2cap_channel_write()` queued the SDU; the drain callback fires once the
- * queue empties. */
-#define L2CAP_WRITE_QUEUED 1
 
 /**
  * Send one SDU of at most `l2cap_channel_snd_mtu()` bytes. Returns
@@ -247,8 +247,9 @@ l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t 
 
 /**
  * Adopt an already-listening SOCK_SEQPACKET descriptor (socket activation,
- * tests). The server takes ownership of `fd` in every case — on failure the
- * descriptor is closed — and switches it to non-blocking, close-on-exec mode.
+ * tests). The server takes ownership of `fd` in every case: on failure the
+ * descriptor is closed, on success it is switched to non-blocking,
+ * close-on-exec mode.
  */
 int
 l2cap_server_attach(l2cap_server_t *server, int fd);
