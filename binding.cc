@@ -3126,12 +3126,15 @@ bare_bluetooth_linux_l2cap_publish(
 
   l2cap_server_init(&srv->server, srv);
 
-  int res = l2cap_server_listen(&srv->server, &local_addr, static_cast<uint16_t>(psm), 4, bare_bluetooth_linux_l2cap_server__on_connection);
+  int res = l2cap_server_listen(&srv->server, &local_addr, static_cast<uint16_t>(psm), 4);
   if (res < 0) {
     const char *message = strerror(-res);
     srv->~bare_bluetooth_linux_l2cap_server_t();
     return fail(message);
   }
+
+  err = l2cap_server_accept_start(&srv->server, bare_bluetooth_linux_l2cap_server__on_connection);
+  assert(err == 0);
 
   err = js_create_reference(env, handle, srv->self);
   assert(err == 0);

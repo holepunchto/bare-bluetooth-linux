@@ -68,6 +68,7 @@ struct l2cap_channel_s {
   int _fd;
   int _state;
   int _reading;
+  uint8_t _security;
   uint16_t _psm;
   uint16_t _rcv_mtu;
   uint16_t _snd_mtu;
@@ -100,6 +101,24 @@ void
 l2cap_channel_init(l2cap_channel_t *channel, void *data);
 
 /**
+ * Levels for `l2cap_channel_set_security()` and `l2cap_server_set_security()`,
+ * matching the kernel's BT_SECURITY_* values.
+ */
+#define L2CAP_SECURITY_LOW    0x01
+#define L2CAP_SECURITY_MEDIUM 0x02
+#define L2CAP_SECURITY_HIGH   0x03
+#define L2CAP_SECURITY_FIPS   0x04
+
+/**
+ * Require a security level for the link, applied when the socket is created —
+ * call it between `l2cap_channel_init()` and `l2cap_channel_connect()`.
+ * Without it the kernel default (low) applies. Channels accepted from a
+ * server inherit the server's level.
+ */
+int
+l2cap_channel_set_security(l2cap_channel_t *channel, uint8_t level);
+
+/**
  * Start a non-blocking connect to `peer` on `psm`, bound to the `local`
  * adapter address. Poll `l2cap_channel_fd()` for `l2cap_channel_events()`
  * and feed the results to `l2cap_channel_process()`; `cb` fires when the
@@ -109,9 +128,10 @@ int
 l2cap_channel_connect(l2cap_channel_t *channel, const l2cap_addr_t *local, const l2cap_addr_t *peer, uint16_t psm, l2cap_connect_cb cb);
 
 /**
- * Adopt an already-connected SOCK_SEQPACKET descriptor. The channel takes
- * ownership of `fd` in every case — on failure the descriptor is closed —
- * and switches it to non-blocking, close-on-exec mode.
+ * Adopt an already-connected SOCK_SEQPACKET descriptor into an initialised,
+ * idle channel — anything else is -EINVAL. The channel takes ownership of
+ * `fd` in every case — on failure the descriptor is closed — and switches it
+ * to non-blocking, close-on-exec mode.
  */
 int
 l2cap_channel_accept(l2cap_channel_t *channel, int fd);
@@ -180,9 +200,11 @@ void
 l2cap_channel_close(l2cap_channel_t *channel);
 
 /**
- * At least one incoming connection is ready: call `l2cap_server_accept()`.
- * Accepting only one is fine — the descriptor stays readable and the next
- * `l2cap_server_process()` fires this again.
+ * At least one incoming connection is ready. The callback must make
+ * progress: accept at least one connection, stop accepting, or close the
+ * server — the descriptor is level-triggered, so a callback that does none
+ * of those fires again on every `l2cap_server_process()`. Accepting only
+ * one is fine: the descriptor stays readable and this fires again.
  */
 typedef void (*l2cap_connection_cb)(l2cap_server_t *server);
 
@@ -197,7 +219,10 @@ struct l2cap_server_s {
   // Private
   int _fd;
   int _state;
+  int _accepting;
+  uint8_t _security;
   uint16_t _psm;
+  l2cap_addr_t _local;
   l2cap_connection_cb _on_connection;
 };
 
@@ -205,12 +230,20 @@ void
 l2cap_server_init(l2cap_server_t *server, void *data);
 
 /**
- * Bind to the `local` adapter address and listen on `psm`. Pass `psm` 0 to
- * let the kernel assign one from the LE dynamic range; read it back with
- * `l2cap_server_psm()`.
+ * Require a security level for accepted links, applied when the socket is
+ * created — call it between `l2cap_server_init()` and `l2cap_server_listen()`.
  */
 int
-l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t psm, int backlog, l2cap_connection_cb cb);
+l2cap_server_set_security(l2cap_server_t *server, uint8_t level);
+
+/**
+ * Bind to the `local` adapter address and listen on `psm`. Pass `psm` 0 to
+ * let the kernel assign one from the LE dynamic range; read it back with
+ * `l2cap_server_psm()`. Nothing is accepted until
+ * `l2cap_server_accept_start()`.
+ */
+int
+l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t psm, int backlog);
 
 /**
  * Adopt an already-listening SOCK_SEQPACKET descriptor (socket activation,
@@ -218,7 +251,7 @@ l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t 
  * descriptor is closed — and switches it to non-blocking, close-on-exec mode.
  */
 int
-l2cap_server_attach(l2cap_server_t *server, int fd, l2cap_connection_cb cb);
+l2cap_server_attach(l2cap_server_t *server, int fd);
 
 int
 l2cap_server_fd(const l2cap_server_t *server);
@@ -229,9 +262,15 @@ l2cap_server_events(const l2cap_server_t *server);
 int
 l2cap_server_process(l2cap_server_t *server, int events);
 
+int
+l2cap_server_accept_start(l2cap_server_t *server, l2cap_connection_cb cb);
+
+int
+l2cap_server_accept_stop(l2cap_server_t *server);
+
 /**
  * Accept one pending connection into `channel`, which must be initialised
- * and idle. Returns a negated errno — -EAGAIN when nothing is pending.
+ * and idle. Returns 0, or a negated errno — -EAGAIN when nothing is pending.
  */
 int
 l2cap_server_accept(l2cap_server_t *server, l2cap_channel_t *channel);
@@ -239,9 +278,13 @@ l2cap_server_accept(l2cap_server_t *server, l2cap_channel_t *channel);
 uint16_t
 l2cap_server_psm(const l2cap_server_t *server);
 
+const l2cap_addr_t *
+l2cap_server_local(const l2cap_server_t *server);
+
 /**
  * Close the listening descriptor. Synchronous and idempotent; accepted
- * channels live on independently.
+ * channels live on independently. Reusing the struct requires a fresh
+ * `l2cap_server_init()`.
  */
 void
 l2cap_server_close(l2cap_server_t *server);
