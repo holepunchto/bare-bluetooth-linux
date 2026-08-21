@@ -4,9 +4,17 @@ find_package(cmake-bare REQUIRED PATHS node_modules/cmake-bare)
 find_package(cmake-fetch REQUIRED PATHS node_modules/cmake-fetch)
 find_package(cmake-harden REQUIRED PATHS node_modules/cmake-harden)
 
-project(bare_bluetooth_linux CXX)
+project(bare_bluetooth_linux C CXX)
 
 fetch_package("github:holepunchto/libjstl#ca590d6")
+
+if(PROJECT_IS_TOP_LEVEL)
+  enable_testing()
+
+  set(L2CAP_ENABLE_TESTS ON)
+endif()
+
+add_subdirectory(libl2cap)
 
 add_bare_module(bare_bluetooth_linux)
 
@@ -31,5 +39,6 @@ target_link_libraries(
   ${bare_bluetooth_linux}
   PRIVATE
     jstl
+    l2cap_static
     ${DBUS_LIBRARIES}
 )
