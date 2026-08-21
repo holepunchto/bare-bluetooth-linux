@@ -27,6 +27,7 @@ extern "C" {
 typedef struct l2cap_addr_s l2cap_addr_t;
 typedef struct l2cap_channel_s l2cap_channel_t;
 typedef struct l2cap_chunk_s l2cap_chunk_t;
+typedef struct l2cap_server_s l2cap_server_t;
 
 /**
  * The result of a `l2cap_channel_connect()`. `status` is 0 on success or a
@@ -177,6 +178,73 @@ l2cap_channel_peer(const l2cap_channel_t *channel);
  */
 void
 l2cap_channel_close(l2cap_channel_t *channel);
+
+/**
+ * At least one incoming connection is ready: call `l2cap_server_accept()`.
+ * Accepting only one is fine — the descriptor stays readable and the next
+ * `l2cap_server_process()` fires this again.
+ */
+typedef void (*l2cap_connection_cb)(l2cap_server_t *server);
+
+/**
+ * A listening endpoint. Same contract as the channel: allocate and
+ * `l2cap_server_init()` it yourself, poll `l2cap_server_fd()` for
+ * `l2cap_server_events()`, feed the results to `l2cap_server_process()`.
+ */
+struct l2cap_server_s {
+  void *data;
+
+  // Private
+  int _fd;
+  int _state;
+  uint16_t _psm;
+  l2cap_connection_cb _on_connection;
+};
+
+void
+l2cap_server_init(l2cap_server_t *server, void *data);
+
+/**
+ * Bind to the `local` adapter address and listen on `psm`. Pass `psm` 0 to
+ * let the kernel assign one from the LE dynamic range; read it back with
+ * `l2cap_server_psm()`.
+ */
+int
+l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t psm, int backlog, l2cap_connection_cb cb);
+
+/**
+ * Adopt an already-listening SOCK_SEQPACKET descriptor (socket activation,
+ * tests). The server takes ownership of `fd` in every case — on failure the
+ * descriptor is closed — and switches it to non-blocking, close-on-exec mode.
+ */
+int
+l2cap_server_attach(l2cap_server_t *server, int fd, l2cap_connection_cb cb);
+
+int
+l2cap_server_fd(const l2cap_server_t *server);
+
+int
+l2cap_server_events(const l2cap_server_t *server);
+
+int
+l2cap_server_process(l2cap_server_t *server, int events);
+
+/**
+ * Accept one pending connection into `channel`, which must be initialised
+ * and idle. Returns a negated errno — -EAGAIN when nothing is pending.
+ */
+int
+l2cap_server_accept(l2cap_server_t *server, l2cap_channel_t *channel);
+
+uint16_t
+l2cap_server_psm(const l2cap_server_t *server);
+
+/**
+ * Close the listening descriptor. Synchronous and idempotent; accepted
+ * channels live on independently.
+ */
+void
+l2cap_server_close(l2cap_server_t *server);
 
 #ifdef __cplusplus
 }

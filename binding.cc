@@ -2956,6 +2956,233 @@ bare_bluetooth_linux_l2cap_peer(
   return str;
 }
 
+using bare_bluetooth_linux_l2cap__on_connection_fn = js_function_t<void, js_receiver_t, js_arraybuffer_t>;
+using bare_bluetooth_linux_l2cap__on_publish_fn = js_function_t<void, js_object_t, std::optional<js_arraybuffer_t>>;
+
+struct bare_bluetooth_linux_l2cap_server_t {
+  js_env_t *env = nullptr;
+  l2cap_server_t server = {};
+  uv_poll_t poll;
+  bool closing = false;
+  bool closed = false;
+  bool torn_down = false;
+  js_deferred_teardown_t *teardown = nullptr;
+  js_ref_t *ctx = nullptr;
+  js_persistent_t<js_arraybuffer_t> self;
+  js_persistent_t<bare_bluetooth_linux_l2cap__on_connection_fn> on_connection;
+};
+
+static void
+bare_bluetooth_linux_l2cap_server__on_poll_close(uv_handle_t *handle) {
+  auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(handle->data);
+
+  l2cap_server_close(&srv->server);
+  srv->closed = true;
+  srv->closing = false;
+
+  int err;
+  if (srv->ctx) {
+    err = js_delete_reference(srv->env, srv->ctx);
+    assert(err == 0);
+    srv->ctx = nullptr;
+  }
+
+  auto *teardown = srv->teardown;
+
+  srv->~bare_bluetooth_linux_l2cap_server_t();
+
+  err = js_finish_deferred_teardown_callback(teardown);
+  assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux_l2cap_server__close(bare_bluetooth_linux_l2cap_server_t *srv) {
+  if (srv->closing || srv->closed) return;
+  srv->closing = true;
+  uv_close(reinterpret_cast<uv_handle_t *>(&srv->poll), bare_bluetooth_linux_l2cap_server__on_poll_close);
+}
+
+static void
+bare_bluetooth_linux_l2cap_server__on_teardown(js_deferred_teardown_t *, void *data) {
+  auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(data);
+  srv->torn_down = true;
+  bare_bluetooth_linux_l2cap_server__close(srv);
+}
+
+static void
+bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
+  auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(server->data);
+
+  if (srv->torn_down || srv->ctx == nullptr) return;
+
+  int err;
+  js_env_t *env = srv->env;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_arraybuffer_t handle;
+  bare_bluetooth_linux_l2cap_t *ch;
+  err = js_create_arraybuffer(env, ch, handle);
+  assert(err == 0);
+
+  new (ch) bare_bluetooth_linux_l2cap_t();
+
+  ch->env = env;
+
+  l2cap_channel_init(&ch->channel, ch);
+
+  int res = l2cap_server_accept(&srv->server, &ch->channel);
+  if (res < 0) {
+    // -EAGAIN or an aborted handshake: nothing to hand to JS either way
+    ch->~bare_bluetooth_linux_l2cap_t();
+
+    err = js_close_handle_scope(env, scope);
+    assert(err == 0);
+    return;
+  }
+
+  err = js_create_reference(env, handle, ch->self);
+  assert(err == 0);
+
+  err = js_add_deferred_teardown_callback(env, bare_bluetooth_linux_l2cap__on_teardown, ch, &ch->teardown);
+  assert(err == 0);
+
+  uv_loop_t *loop;
+  err = js_get_env_loop(env, &loop);
+  assert(err == 0);
+
+  err = uv_poll_init(loop, &ch->poll, l2cap_channel_fd(&ch->channel));
+  assert(err == 0);
+
+  ch->poll.data = ch;
+
+  js_value_t *receiver;
+  err = js_get_reference_value(env, srv->ctx, &receiver);
+  assert(err == 0);
+
+  bare_bluetooth_linux_l2cap__on_connection_fn fn;
+  err = js_get_reference_value(env, srv->on_connection, fn);
+  assert(err == 0);
+
+  err = js_call_function_with_checkpoint(env, fn, js_receiver_t(receiver), handle);
+  assert(err != js_pending_exception);
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux_l2cap_server__on_poll(uv_poll_t *poll, int status, int events) {
+  auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(poll->data);
+
+  if (srv->closing || srv->closed) return;
+
+  int fired = 0;
+  if (status < 0 || (events & UV_READABLE)) fired = L2CAP_READABLE;
+
+  int err = l2cap_server_process(&srv->server, fired);
+  assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux_l2cap_publish(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  uint32_t psm,
+  js_object_t context,
+  bare_bluetooth_linux_l2cap__on_connection_fn on_connection,
+  bare_bluetooth_linux_l2cap__on_publish_fn callback
+) {
+  int err;
+
+  auto fail = [&](const char *message) {
+    js_object_t error;
+    err = js_create_error(env, message, error);
+    assert(err == 0);
+
+    err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>());
+    assert(err != js_pending_exception);
+  };
+
+  auto local = dbus_get_string_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Address");
+  if (!local) return fail("Unknown adapter address");
+
+  l2cap_addr_t local_addr;
+  if (l2cap_addr_init(local->c_str(), L2CAP_BDADDR_LE_PUBLIC, &local_addr) < 0) {
+    return fail("Invalid adapter address");
+  }
+
+  js_arraybuffer_t handle;
+  bare_bluetooth_linux_l2cap_server_t *srv;
+  err = js_create_arraybuffer(env, srv, handle);
+  assert(err == 0);
+
+  new (srv) bare_bluetooth_linux_l2cap_server_t();
+
+  srv->env = env;
+
+  l2cap_server_init(&srv->server, srv);
+
+  int res = l2cap_server_listen(&srv->server, &local_addr, static_cast<uint16_t>(psm), 4, bare_bluetooth_linux_l2cap_server__on_connection);
+  if (res < 0) {
+    const char *message = strerror(-res);
+    srv->~bare_bluetooth_linux_l2cap_server_t();
+    return fail(message);
+  }
+
+  err = js_create_reference(env, handle, srv->self);
+  assert(err == 0);
+
+  err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &srv->ctx);
+  assert(err == 0);
+
+  err = js_create_reference(env, on_connection, srv->on_connection);
+  assert(err == 0);
+
+  err = js_add_deferred_teardown_callback(env, bare_bluetooth_linux_l2cap_server__on_teardown, srv, &srv->teardown);
+  assert(err == 0);
+
+  uv_loop_t *loop;
+  err = js_get_env_loop(env, &loop);
+  assert(err == 0);
+
+  err = uv_poll_init(loop, &srv->poll, l2cap_server_fd(&srv->server));
+  assert(err == 0);
+
+  srv->poll.data = srv;
+
+  err = uv_poll_start(&srv->poll, UV_READABLE, bare_bluetooth_linux_l2cap_server__on_poll);
+  assert(err == 0);
+
+  js_object_t error;
+  err = js_get_null(env, error);
+  assert(err == 0);
+
+  err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>(handle));
+  assert(err != js_pending_exception);
+}
+
+static void
+bare_bluetooth_linux_l2cap_unpublish(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_server_t, 1> srv
+) {
+  bare_bluetooth_linux_l2cap_server__close(&*srv);
+}
+
+static uint32_t
+bare_bluetooth_linux_l2cap_server_psm(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_server_t, 1> srv
+) {
+  return l2cap_server_psm(&srv->server);
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -3017,6 +3244,10 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("l2capEnd", bare_bluetooth_linux_l2cap_end)
   V("l2capPsm", bare_bluetooth_linux_l2cap_psm)
   V("l2capPeer", bare_bluetooth_linux_l2cap_peer)
+
+  V("l2capPublish", bare_bluetooth_linux_l2cap_publish)
+  V("l2capUnpublish", bare_bluetooth_linux_l2cap_unpublish)
+  V("l2capServerPsm", bare_bluetooth_linux_l2cap_server_psm)
 
 #undef V
 

@@ -69,6 +69,12 @@ enum {
   L2CAP_STATE_CLOSED,
 };
 
+enum {
+  L2CAP_SERVER_STATE_IDLE = 0,
+  L2CAP_SERVER_STATE_LISTENING,
+  L2CAP_SERVER_STATE_CLOSED,
+};
+
 static int
 l2cap__hexval(char c) {
   if (c >= '0' && c <= '9') return c - '0';
@@ -402,4 +408,120 @@ l2cap_channel_close(l2cap_channel_t *channel) {
   channel->_write_tail = NULL;
 
   channel->_state = L2CAP_STATE_CLOSED;
+}
+
+static int
+l2cap_server__set_nonblock_cloexec(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return -errno;
+
+  fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+  return 0;
+}
+
+void
+l2cap_server_init(l2cap_server_t *server, void *data) {
+  memset(server, 0, sizeof(*server));
+  server->data = data;
+  server->_fd = -1;
+}
+
+int
+l2cap_server_listen(l2cap_server_t *server, const l2cap_addr_t *local, uint16_t psm, int backlog, l2cap_connection_cb cb) {
+  int fd = socket(AF_BLUETOOTH, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_L2CAP);
+  if (fd < 0) return -errno;
+
+  struct l2cap_sockaddr_l2 local_addr;
+  memset(&local_addr, 0, sizeof(local_addr));
+  local_addr.l2_family = AF_BLUETOOTH;
+  local_addr.l2_psm = htole16(psm);
+  local_addr.l2_bdaddr_type = local->type;
+  memcpy(local_addr.l2_bdaddr, local->bdaddr, sizeof(local_addr.l2_bdaddr));
+
+  if (bind(fd, (struct sockaddr *) &local_addr, sizeof(local_addr)) != 0 || listen(fd, backlog) != 0) {
+    int err = errno;
+    close(fd);
+    return -err;
+  }
+
+  // psm 0 lets the kernel assign one; read the assigned value back
+  socklen_t len = sizeof(local_addr);
+  if (getsockname(fd, (struct sockaddr *) &local_addr, &len) != 0) {
+    int err = errno;
+    close(fd);
+    return -err;
+  }
+
+  server->_fd = fd;
+  server->_state = L2CAP_SERVER_STATE_LISTENING;
+  server->_psm = le16toh(local_addr.l2_psm);
+  server->_on_connection = cb;
+
+  return 0;
+}
+
+int
+l2cap_server_attach(l2cap_server_t *server, int fd, l2cap_connection_cb cb) {
+  int err = l2cap_server__set_nonblock_cloexec(fd);
+  if (err < 0) {
+    close(fd);
+    return err;
+  }
+
+  server->_fd = fd;
+  server->_state = L2CAP_SERVER_STATE_LISTENING;
+  server->_on_connection = cb;
+
+  // A Bluetooth descriptor knows its PSM; other families leave it zeroed
+  struct l2cap_sockaddr_l2 addr;
+  socklen_t len = sizeof(addr);
+  memset(&addr, 0, sizeof(addr));
+  if (getsockname(fd, (struct sockaddr *) &addr, &len) == 0 && addr.l2_family == AF_BLUETOOTH) {
+    server->_psm = le16toh(addr.l2_psm);
+  }
+
+  return 0;
+}
+
+int
+l2cap_server_fd(const l2cap_server_t *server) {
+  return server->_fd;
+}
+
+int
+l2cap_server_events(const l2cap_server_t *server) {
+  return server->_state == L2CAP_SERVER_STATE_LISTENING ? L2CAP_READABLE : 0;
+}
+
+int
+l2cap_server_process(l2cap_server_t *server, int events) {
+  if (server->_state != L2CAP_SERVER_STATE_LISTENING) return 0;
+  if (events & L2CAP_READABLE) server->_on_connection(server);
+  return 0;
+}
+
+int
+l2cap_server_accept(l2cap_server_t *server, l2cap_channel_t *channel) {
+  if (server->_state != L2CAP_SERVER_STATE_LISTENING) return -EINVAL;
+
+  int fd = accept(server->_fd, NULL, NULL);
+  if (fd < 0) return -errno;
+
+  return l2cap_channel_accept(channel, fd);
+}
+
+uint16_t
+l2cap_server_psm(const l2cap_server_t *server) {
+  return server->_psm;
+}
+
+void
+l2cap_server_close(l2cap_server_t *server) {
+  if (server->_state == L2CAP_SERVER_STATE_CLOSED) return;
+
+  if (server->_fd >= 0) close(server->_fd);
+  server->_fd = -1;
+
+  server->_state = L2CAP_SERVER_STATE_CLOSED;
 }

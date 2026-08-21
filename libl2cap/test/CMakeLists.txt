@@ -6,6 +6,7 @@ list(APPEND tests
   drain-after-close
   mtu
   events
+  server
 )
 
 foreach(test IN LISTS tests)

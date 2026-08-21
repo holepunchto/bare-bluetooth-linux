@@ -10,6 +10,21 @@ test('device openL2CAPChannel is a function', (t) => {
   t.is(typeof Device.prototype.openL2CAPChannel, 'function')
 })
 
+test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.publishL2CAPChannel()
+
+  const psm = await new Promise((resolve, reject) => {
+    adapter.on('channelPublish', resolve)
+    adapter.on('error', reject)
+  })
+
+  t.ok(psm >= 0x80 && psm <= 0xff, 'psm in LE dynamic range: 0x' + psm.toString(16))
+
+  adapter.unpublishL2CAPChannel(psm)
+})
+
 test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
