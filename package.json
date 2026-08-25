@@ -16,7 +16,6 @@
     "binding.js",
     "CMakeLists.txt",
     "lib",
-    "libl2cap",
     "prebuilds"
   ],
   "addon": true,
