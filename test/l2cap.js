@@ -61,6 +61,23 @@ test('remote close ends the channel', async (t) => {
   t.ok(a.destroyed, 'stream destroyed after remote close')
 })
 
+test('oversized write errors precisely, exactly once', async (t) => {
+  t.plan(3)
+
+  const [a, b] = pair()
+
+  t.ok(a.mtu > 0, 'mtu exposed: ' + a.mtu)
+
+  a.on('error', (err) => t.ok(/MTU/.test(err.message), 'precise error: ' + err.message))
+
+  a.write(Buffer.alloc(a.mtu + 1))
+
+  await new Promise((resolve) => a.once('close', resolve))
+  t.ok(a.destroyed, 'stream destroyed by failed write')
+
+  b.destroy()
+})
+
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 

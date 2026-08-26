@@ -2946,6 +2946,15 @@ bare_bluetooth_linux_l2cap_psm(
   return l2cap_channel_psm(&ch->channel);
 }
 
+static uint32_t
+bare_bluetooth_linux_l2cap_mtu(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_t, 1> ch
+) {
+  return l2cap_channel_snd_mtu(&ch->channel);
+}
+
 static std::string
 bare_bluetooth_linux_l2cap_peer(
   js_env_t *env,
@@ -3297,6 +3306,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("l2capWrite", bare_bluetooth_linux_l2cap_write)
   V("l2capEnd", bare_bluetooth_linux_l2cap_end)
   V("l2capPsm", bare_bluetooth_linux_l2cap_psm)
+  V("l2capMtu", bare_bluetooth_linux_l2cap_mtu)
   V("l2capPeer", bare_bluetooth_linux_l2cap_peer)
 
   V("l2capPair", bare_bluetooth_linux_l2cap_pair)
