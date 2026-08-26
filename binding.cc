@@ -8,6 +8,7 @@
 #include <optional>
 #include <string.h>
 #include <string>
+#include <sys/socket.h>
 #include <type_traits>
 #include <unordered_map>
 #include <uv.h>
@@ -3186,6 +3187,56 @@ bare_bluetooth_linux_l2cap_server_psm(
   return l2cap_server_psm(&srv->server);
 }
 
+// TODO: bare-tcp exposes socketpair() but hardcodes SOCK_STREAM; once it
+// accepts a type parameter (SOCK_SEQPACKET), this can shrink to an fd-adopting
+// l2capAccept(fd) fed from JS
+static std::vector<js_arraybuffer_t>
+bare_bluetooth_linux_l2cap_pair(js_env_t *env, js_receiver_t) {
+  int err;
+
+  int fds[2];
+  err = socketpair(AF_UNIX, SOCK_SEQPACKET, 0, fds);
+  assert(err == 0);
+
+  uv_loop_t *loop;
+  err = js_get_env_loop(env, &loop);
+  assert(err == 0);
+
+  std::vector<js_arraybuffer_t> handles;
+  handles.reserve(2);
+
+  for (int fd : fds) {
+    js_arraybuffer_t handle;
+    bare_bluetooth_linux_l2cap_t *ch;
+    err = js_create_arraybuffer(env, ch, handle);
+    assert(err == 0);
+
+    new (ch) bare_bluetooth_linux_l2cap_t();
+
+    ch->env = env;
+
+    l2cap_channel_init(&ch->channel, ch);
+
+    err = l2cap_channel_accept(&ch->channel, fd);
+    assert(err == 0);
+
+    err = js_create_reference(env, handle, ch->self);
+    assert(err == 0);
+
+    err = js_add_deferred_teardown_callback(env, bare_bluetooth_linux_l2cap__on_teardown, ch, &ch->teardown);
+    assert(err == 0);
+
+    err = uv_poll_init(loop, &ch->poll, l2cap_channel_fd(&ch->channel));
+    assert(err == 0);
+
+    ch->poll.data = ch;
+
+    handles.push_back(handle);
+  }
+
+  return handles;
+}
+
 static js_value_t *
 bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   int err;
@@ -3247,6 +3298,8 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("l2capEnd", bare_bluetooth_linux_l2cap_end)
   V("l2capPsm", bare_bluetooth_linux_l2cap_psm)
   V("l2capPeer", bare_bluetooth_linux_l2cap_peer)
+
+  V("l2capPair", bare_bluetooth_linux_l2cap_pair)
 
   V("l2capPublish", bare_bluetooth_linux_l2cap_publish)
   V("l2capUnpublish", bare_bluetooth_linux_l2cap_unpublish)

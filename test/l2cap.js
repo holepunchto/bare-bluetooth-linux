@@ -1,5 +1,6 @@
 const test = require('brittle')
 const { Adapter, Device, L2CAPChannel } = require('..')
+const binding = require('../binding')
 const { isCI } = require('./helpers')
 
 test('L2CAPChannel is exported', (t) => {
@@ -8,6 +9,28 @@ test('L2CAPChannel is exported', (t) => {
 
 test('device openL2CAPChannel is a function', (t) => {
   t.is(typeof Device.prototype.openL2CAPChannel, 'function')
+})
+
+// A socketpair adopted as two connected channels, like libl2cap's own tests
+function pair() {
+  const [a, b] = binding.l2capPair()
+  return [new L2CAPChannel(a), new L2CAPChannel(b)]
+}
+
+test('fatal native error destroys the channel, exactly one error', async (t) => {
+  t.plan(2)
+
+  const [a, b] = pair()
+
+  b.destroy()
+  await new Promise((resolve) => b.once('close', resolve))
+
+  a.on('error', (err) => t.pass('channel errored: ' + err.message))
+
+  a.write(Buffer.from('hello'))
+
+  await new Promise((resolve) => a.once('close', resolve))
+  t.ok(a.destroyed, 'stream destroyed after native error')
 })
 
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
