@@ -78,6 +78,20 @@ test('oversized write errors precisely, exactly once', async (t) => {
   b.destroy()
 })
 
+test('openL2CAPChannel failure emits error asynchronously', async (t) => {
+  t.plan(1)
+
+  using adapter = new Adapter()
+
+  const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
+
+  device.openL2CAPChannel(0x80)
+
+  // The listener is attached after the call: a synchronous emit would crash
+  const err = await new Promise((resolve) => device.on('error', resolve))
+  t.ok(err, 'error delivered to listener: ' + err.message)
+})
+
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 
