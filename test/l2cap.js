@@ -33,6 +33,34 @@ test('fatal native error destroys the channel, exactly one error', async (t) => 
   t.ok(a.destroyed, 'stream destroyed after native error')
 })
 
+test('destroy emits close exactly once', async (t) => {
+  t.plan(1)
+
+  const [a, b] = pair()
+
+  a.on('close', () => t.pass('closed'))
+
+  a.destroy()
+  b.destroy()
+
+  // Let the deferred native close run so a duplicate 'close' would be caught
+  await new Promise((resolve) => setTimeout(resolve, 100))
+})
+
+test('remote close ends the channel', async (t) => {
+  t.plan(2)
+
+  const [a, b] = pair()
+
+  a.on('data', () => {})
+  a.on('end', () => t.pass('ended'))
+
+  b.destroy()
+
+  await new Promise((resolve) => a.once('close', resolve))
+  t.ok(a.destroyed, 'stream destroyed after remote close')
+})
+
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 
