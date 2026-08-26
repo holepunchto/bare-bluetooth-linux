@@ -2968,6 +2968,7 @@ bare_bluetooth_linux_l2cap_peer(
 
 using bare_bluetooth_linux_l2cap__on_connection_fn = js_function_t<void, js_receiver_t, js_arraybuffer_t>;
 using bare_bluetooth_linux_l2cap__on_publish_fn = js_function_t<void, js_object_t, std::optional<js_arraybuffer_t>>;
+using bare_bluetooth_linux_l2cap__on_server_error_fn = js_function_t<void, js_receiver_t, uint32_t, std::string>;
 
 struct bare_bluetooth_linux_l2cap_server_t {
   js_env_t *env = nullptr;
@@ -2980,6 +2981,7 @@ struct bare_bluetooth_linux_l2cap_server_t {
   js_ref_t *ctx = nullptr;
   js_persistent_t<js_arraybuffer_t> self;
   js_persistent_t<bare_bluetooth_linux_l2cap__on_connection_fn> on_connection;
+  js_persistent_t<bare_bluetooth_linux_l2cap__on_server_error_fn> on_error;
 };
 
 static void
@@ -3020,6 +3022,32 @@ bare_bluetooth_linux_l2cap_server__on_teardown(js_deferred_teardown_t *, void *d
 }
 
 static void
+bare_bluetooth_linux_l2cap_server__emit_error(bare_bluetooth_linux_l2cap_server_t *srv, uint32_t psm, std::string message) {
+  if (srv->torn_down || srv->ctx == nullptr) return;
+
+  int err;
+  js_env_t *env = srv->env;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_value_t *receiver;
+  err = js_get_reference_value(env, srv->ctx, &receiver);
+  assert(err == 0);
+
+  bare_bluetooth_linux_l2cap__on_server_error_fn fn;
+  err = js_get_reference_value(env, srv->on_error, fn);
+  assert(err == 0);
+
+  err = js_call_function_with_checkpoint(env, fn, js_receiver_t(receiver), psm, message);
+  assert(err != js_pending_exception);
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+}
+
+static void
 bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
   auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(server->data);
 
@@ -3045,11 +3073,17 @@ bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
 
   int res = l2cap_server_accept(&srv->server, &ch->channel);
   if (res < 0) {
-    // -EAGAIN or an aborted handshake: nothing to hand to JS either way
     ch->~bare_bluetooth_linux_l2cap_t();
 
     err = js_close_handle_scope(env, scope);
     assert(err == 0);
+
+    // The library stops accepting on failures that cannot clear on their
+    // own; the descriptor stays readable, so polling on would spin
+    if (!l2cap_server_failed(&srv->server)) return;
+
+    bare_bluetooth_linux_l2cap_server__emit_error(srv, l2cap_server_psm(&srv->server), strerror(-res));
+    bare_bluetooth_linux_l2cap_server__close(srv);
     return;
   }
 
@@ -3104,6 +3138,7 @@ bare_bluetooth_linux_l2cap_publish(
   uint32_t psm,
   js_object_t context,
   bare_bluetooth_linux_l2cap__on_connection_fn on_connection,
+  bare_bluetooth_linux_l2cap__on_server_error_fn on_error,
   bare_bluetooth_linux_l2cap__on_publish_fn callback
 ) {
   int err;
@@ -3153,6 +3188,9 @@ bare_bluetooth_linux_l2cap_publish(
   assert(err == 0);
 
   err = js_create_reference(env, on_connection, srv->on_connection);
+  assert(err == 0);
+
+  err = js_create_reference(env, on_error, srv->on_error);
   assert(err == 0);
 
   err = js_add_deferred_teardown_callback(env, bare_bluetooth_linux_l2cap_server__on_teardown, srv, &srv->teardown);
