@@ -94,3 +94,28 @@ test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, 
 
   t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)
 })
+
+test(
+  'destroy in the same tick as publish releases the psm',
+  { skip: !vhci, timeout: 30000 },
+  async (t) => {
+    const adapter = new Adapter({ path: vhci.a })
+    adapter.powered = true
+
+    adapter.on('channelPublish', () => t.fail('emitted on a destroyed adapter'))
+    adapter.publishL2CAPChannel({ psm: 0x81 })
+    adapter.destroy()
+
+    // Let the deferred registration run
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // The psm must be free again: a fresh adapter can bind it
+    using retry = new Adapter({ path: vhci.a })
+    retry.publishL2CAPChannel({ psm: 0x81 })
+    const psm = await new Promise((resolve, reject) => {
+      retry.on('channelPublish', resolve)
+      retry.on('error', reject)
+    })
+    t.is(psm, 0x81, 'psm rebindable after same-tick destroy')
+  }
+)
