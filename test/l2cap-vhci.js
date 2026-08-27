@@ -1,11 +1,7 @@
-// End-to-end L2CAP over two virtual controllers (test/vhci.sh). Public API
-// only: publish on one adapter, discover and connect from the other.
 const test = require('brittle')
 const { Adapter, Advertisement } = require('..')
 const { vhci } = require('./helpers')
 
-// In its own scope so the long-lived teardown closure does not retain the
-// whole openPair context (it would pin the device via context sharing)
 function teardown(t, client, server) {
   t.teardown(() => {
     client.destroy()
@@ -13,7 +9,6 @@ function teardown(t, client, server) {
   })
 }
 
-// The publish/advertise/discover/connect dance shared by every scenario
 async function openPair(t, { accept = true } = {}) {
   const server = new Adapter({ path: vhci.a })
   const client = new Adapter({ path: vhci.b })
@@ -89,8 +84,6 @@ test('adapter destroy closes accepted channels', { skip: !vhci, timeout: 30000 }
 test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, async (t) => {
   const { device, psm } = await openPair(t, { accept: false })
 
-  device.openL2CAPChannel(psm)
-
   // Depending on timing the peer teardown surfaces as a short-lived channel
   // or as a failed open; either proves the server did not keep it
   const result = await new Promise((resolve) => {
@@ -99,6 +92,8 @@ test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, 
       channel.once('close', () => resolve('closed'))
     })
     device.on('error', () => resolve('rejected'))
+
+    device.openL2CAPChannel(psm)
   })
 
   t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)

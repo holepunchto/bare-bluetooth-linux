@@ -11,13 +11,7 @@ test('device openL2CAPChannel is a function', (t) => {
   t.is(typeof Device.prototype.openL2CAPChannel, 'function')
 })
 
-// A socketpair adopted as two connected channels, like libl2cap's own tests
-function pair() {
-  const [a, b] = binding.l2capPair()
-  return [new L2CAPChannel(a), new L2CAPChannel(b)]
-}
-
-test('fatal native error destroys the channel, exactly one error', async (t) => {
+test('a transport error destroys the channel', async (t) => {
   t.plan(2)
 
   const [a, b] = pair()
@@ -26,7 +20,6 @@ test('fatal native error destroys the channel, exactly one error', async (t) => 
   await new Promise((resolve) => b.once('close', resolve))
 
   a.on('error', (err) => t.pass('channel errored: ' + err.message))
-
   a.write(Buffer.from('hello'))
 
   await new Promise((resolve) => a.once('close', resolve))
@@ -34,11 +27,12 @@ test('fatal native error destroys the channel, exactly one error', async (t) => 
 })
 
 test('destroy emits close exactly once', async (t) => {
-  t.plan(1)
+  t.plan(2)
 
   const [a, b] = pair()
 
-  a.on('close', () => t.pass('closed'))
+  a.on('close', () => t.pass('a closed'))
+  b.on('close', () => t.pass('b closed'))
 
   a.destroy()
   b.destroy()
@@ -61,7 +55,7 @@ test('remote close ends the channel', async (t) => {
   t.ok(a.destroyed, 'stream destroyed after remote close')
 })
 
-test('oversized write errors precisely, exactly once', async (t) => {
+test('a write above the channel mtu fails', async (t) => {
   t.plan(3)
 
   const [a, b] = pair()
@@ -69,7 +63,6 @@ test('oversized write errors precisely, exactly once', async (t) => {
   t.ok(a.mtu > 0, 'mtu exposed: ' + a.mtu)
 
   a.on('error', (err) => t.ok(/MTU/.test(err.message), 'precise error: ' + err.message))
-
   a.write(Buffer.alloc(a.mtu + 1))
 
   await new Promise((resolve) => a.once('close', resolve))
@@ -78,33 +71,53 @@ test('oversized write errors precisely, exactly once', async (t) => {
   b.destroy()
 })
 
+test('a queued write fails when the channel closes', async (t) => {
+  t.plan(2)
+
+  const [a, b] = pair()
+
+  // Enough unread data to fill the kernel buffer so a write gets queued
+  for (let i = 0; i < 400; i++) a.write(Buffer.alloc(600))
+
+  a.on('error', (err) => t.pass('queued write failed: ' + err.message))
+
+  b.destroy()
+
+  await new Promise((resolve) => a.once('close', resolve))
+  t.ok(a.destroyed, 'channel destroyed, queued write not left hanging')
+})
+
 test('openL2CAPChannel failure emits error asynchronously', async (t) => {
   t.plan(1)
 
   using adapter = new Adapter()
-
   const device = new Device(adapter, '/org/bluez/hci0/dev_invalid', 'not-a-bdaddr')
 
-  device.openL2CAPChannel(0x80)
+  let sync = true
+  const emitted = new Promise((resolve) => {
+    device.on('error', (err) => {
+      t.ok(!sync, 'emitted asynchronously: ' + err.message)
+      resolve()
+    })
+  })
 
-  // The listener is attached after the call: a synchronous emit would crash
-  const err = await new Promise((resolve) => device.on('error', resolve))
-  t.ok(err, 'error delivered to listener: ' + err.message)
+  device.openL2CAPChannel(0x80)
+  sync = false
+
+  await emitted
 })
 
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 
-  adapter.publishL2CAPChannel()
-
   const psm = await new Promise((resolve, reject) => {
     adapter.on('channelPublish', resolve)
     adapter.on('error', reject)
+
+    adapter.publishL2CAPChannel()
   })
 
   t.ok(psm >= 0x80 && psm <= 0xff, 'psm in LE dynamic range: 0x' + psm.toString(16))
-
-  adapter.unpublishL2CAPChannel(psm)
 })
 
 test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async (t) => {
@@ -120,11 +133,11 @@ test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
-  device.openL2CAPChannel(0x80)
-
   const [channel, err] = await new Promise((resolve) => {
     device.on('channelOpen', (channel) => resolve([channel, null]))
     device.on('error', (err) => resolve([null, err]))
+
+    device.openL2CAPChannel(0x80)
   })
 
   if (err) {
@@ -137,3 +150,11 @@ test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async
     channel.destroy()
   }
 })
+
+// Helpers
+
+// A socketpair adopted as two connected channels, like libl2cap's own tests
+function pair() {
+  const [a, b] = binding.l2capPair()
+  return [new L2CAPChannel(a), new L2CAPChannel(b)]
+}
