@@ -83,7 +83,7 @@ test('openL2CAPChannel failure emits error asynchronously', async (t) => {
 
   using adapter = new Adapter()
 
-  const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
+  const device = new Device(adapter, '/org/bluez/hci0/dev_invalid', 'not-a-bdaddr')
 
   device.openL2CAPChannel(0x80)
 

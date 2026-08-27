@@ -295,6 +295,7 @@ struct bare_bluetooth_linux_adapter_t;
 struct bare_bluetooth_linux_device_added_event_t {
   std::string path;
   std::string address;
+  std::string address_type;
 };
 
 struct bare_bluetooth_linux_device_removed_event_t {
@@ -386,7 +387,7 @@ using bare_bluetooth_linux__noop_fn =
   js_function_t<void, js_receiver_t>;
 
 using bare_bluetooth_linux__on_device_added_fn =
-  js_function_t<void, js_receiver_t, std::string, std::string>;
+  js_function_t<void, js_receiver_t, std::string, std::string, std::string>;
 
 using bare_bluetooth_linux__on_device_removed_fn =
   js_function_t<void, js_receiver_t, std::string>;
@@ -500,7 +501,7 @@ bare_bluetooth_linux__on_device_added(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->address);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->address, event->address_type);
 
   delete event;
 
@@ -970,6 +971,7 @@ bare_bluetooth_linux__scan_object(bare_bluetooth_linux_adapter_t *adapter, const
 
   bool is_device = false;
   std::string address;
+  std::string address_type;
 
   bool is_service = false;
   std::string service_uuid;
@@ -991,10 +993,13 @@ bare_bluetooth_linux__scan_object(bare_bluetooth_linux_adapter_t *adapter, const
       dbus_message_iter_next(&entry);
       DBusMessageIter props_iter;
       dbus_message_iter_recurse(&entry, &props_iter);
+      DBusMessageIter props_copy = props_iter;
       auto addr = dbus_find_string_in_props(&props_iter, "Address");
       if (addr) {
         is_device = true;
         address = *addr;
+        auto type = dbus_find_string_in_props(&props_copy, "AddressType");
+        if (type) address_type = *type;
       }
 
     } else if (strcmp(iface_name, BLUEZ_GATT_SERVICE_IFACE) == 0) {
@@ -1035,6 +1040,7 @@ bare_bluetooth_linux__scan_object(bare_bluetooth_linux_adapter_t *adapter, const
     auto *event = new bare_bluetooth_linux_device_added_event_t;
     event->path = obj_path;
     event->address = address;
+    event->address_type = address_type;
     js_call_threadsafe_function(adapter->tsfn_device_added, event, js_threadsafe_function_nonblocking);
   }
 
@@ -2812,8 +2818,9 @@ static void
 bare_bluetooth_linux_device_open_l2cap_channel(
   js_env_t *env,
   js_receiver_t,
-  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
-  std::string path,
+  std::string local,
+  std::string address,
+  std::string address_type,
   uint32_t psm,
   bare_bluetooth_linux_l2cap__on_channel_fn callback
 ) {
@@ -2828,23 +2835,15 @@ bare_bluetooth_linux_device_open_l2cap_channel(
     assert(err != js_pending_exception);
   };
 
-  auto address = dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Address");
-  if (!address) return fail("Unknown device address");
-
-  auto address_type = dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "AddressType");
-
-  auto local = dbus_get_string_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Address");
-  if (!local) return fail("Unknown adapter address");
-
   l2cap_addr_t local_addr;
-  if (l2cap_addr_init(local->c_str(), L2CAP_BDADDR_LE_PUBLIC, &local_addr) < 0) {
+  if (l2cap_addr_init(local.c_str(), L2CAP_BDADDR_LE_PUBLIC, &local_addr) < 0) {
     return fail("Invalid adapter address");
   }
 
-  uint8_t peer_type = address_type && *address_type == "random" ? L2CAP_BDADDR_LE_RANDOM : L2CAP_BDADDR_LE_PUBLIC;
+  uint8_t peer_type = address_type == "random" ? L2CAP_BDADDR_LE_RANDOM : L2CAP_BDADDR_LE_PUBLIC;
 
   l2cap_addr_t peer_addr;
-  if (l2cap_addr_init(address->c_str(), peer_type, &peer_addr) < 0) {
+  if (l2cap_addr_init(address.c_str(), peer_type, &peer_addr) < 0) {
     return fail("Invalid device address");
   }
 
