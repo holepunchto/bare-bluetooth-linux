@@ -962,19 +962,11 @@ bare_bluetooth_linux__on_tsfn_finalize(js_env_t *env, bare_bluetooth_linux_tsfn_
 }
 
 static void
-bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapter, DBusMessage *msg) {
-  DBusMessageIter args;
-  if (!dbus_message_iter_init(msg, &args)) return;
-
-  const char *obj_path;
-  dbus_message_iter_get_basic(&args, &obj_path);
-  dbus_message_iter_next(&args);
-
+bare_bluetooth_linux__scan_object(bare_bluetooth_linux_adapter_t *adapter, const char *obj_path, DBusMessageIter *ifaces_ptr) {
   if (strncmp(obj_path, adapter->adapter_path.c_str(), adapter->adapter_path.length()) != 0)
     return;
 
-  DBusMessageIter ifaces_iter;
-  dbus_message_iter_recurse(&args, &ifaces_iter);
+  DBusMessageIter ifaces_iter = *ifaces_ptr;
 
   bool is_device = false;
   std::string address;
@@ -1066,6 +1058,57 @@ bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapte
     event->uuid = desc_uuid;
     js_call_threadsafe_function(adapter->tsfn_desc_added, event, js_threadsafe_function_nonblocking);
   }
+}
+
+static void
+bare_bluetooth_linux__on_interfaces_added(bare_bluetooth_linux_adapter_t *adapter, DBusMessage *msg) {
+  DBusMessageIter args;
+  if (!dbus_message_iter_init(msg, &args)) return;
+
+  const char *obj_path;
+  dbus_message_iter_get_basic(&args, &obj_path);
+  dbus_message_iter_next(&args);
+
+  DBusMessageIter ifaces_iter;
+  dbus_message_iter_recurse(&args, &ifaces_iter);
+
+  bare_bluetooth_linux__scan_object(adapter, obj_path, &ifaces_iter);
+}
+
+// Objects that existed before this adapter connected (bluetoothd caches
+// discovered devices) never signal InterfacesAdded again; replay them
+static void
+bare_bluetooth_linux__sync_existing_objects(bare_bluetooth_linux_adapter_t *adapter) {
+  DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, "/", DBUS_OM_IFACE, "GetManagedObjects");
+  if (msg == nullptr) return;
+
+  DBusMessage *reply = dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, nullptr);
+  dbus_message_unref(msg);
+  if (reply == nullptr) return;
+
+  DBusMessageIter args;
+  if (dbus_message_iter_init(reply, &args) && dbus_message_iter_get_arg_type(&args) == DBUS_TYPE_ARRAY) {
+    DBusMessageIter objs;
+    dbus_message_iter_recurse(&args, &objs);
+
+    while (dbus_message_iter_get_arg_type(&objs) == DBUS_TYPE_DICT_ENTRY) {
+      DBusMessageIter entry;
+      dbus_message_iter_recurse(&objs, &entry);
+
+      const char *obj_path;
+      dbus_message_iter_get_basic(&entry, &obj_path);
+      dbus_message_iter_next(&entry);
+
+      DBusMessageIter ifaces_iter;
+      dbus_message_iter_recurse(&entry, &ifaces_iter);
+
+      bare_bluetooth_linux__scan_object(adapter, obj_path, &ifaces_iter);
+
+      dbus_message_iter_next(&objs);
+    }
+  }
+
+  dbus_message_unref(reply);
 }
 
 static void
@@ -1774,6 +1817,8 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux_tsfn_ctx_t,
     bare_bluetooth_linux_gatt_characteristic_write_event_t>(env, on_gatt_characteristic_write, 0, 1, gatt_characteristic_write_ctx, adapter->tsfn_gatt_characteristic_write);
   assert(err == 0);
+
+  bare_bluetooth_linux__sync_existing_objects(adapter);
 
   uv_thread_create(&adapter->thread, bare_bluetooth_linux__dbus_thread, adapter);
 

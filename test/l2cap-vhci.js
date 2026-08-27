@@ -4,44 +4,56 @@ const test = require('brittle')
 const { Adapter, Advertisement } = require('..')
 const { vhci } = require('./helpers')
 
-test('l2cap end to end over virtual controllers', { skip: !vhci, timeout: 30000 }, async (t) => {
-  using server = new Adapter({ path: vhci.a })
-  using client = new Adapter({ path: vhci.b })
+// The publish/advertise/discover/connect dance shared by every scenario
+async function openPair(t, { accept = true } = {}) {
+  const server = new Adapter({ path: vhci.a })
+  const client = new Adapter({ path: vhci.b })
+  t.teardown(() => {
+    client.destroy()
+    server.destroy()
+  })
 
   server.powered = true
   client.powered = true
-
-  const serverAddress = server.address
 
   server.publishL2CAPChannel()
   const psm = await new Promise((resolve, reject) => {
     server.on('channelPublish', resolve)
     server.on('error', reject)
   })
-  t.ok(psm > 0, 'psm published: 0x' + psm.toString(16))
 
   const ad = new Advertisement({ type: 'peripheral', localName: 'bare-vhci' })
   await server.registerAdvertisement(ad)
 
   client.setDiscoveryFilter({ transport: 'le' })
   client.startDiscovery()
-  const device = await new Promise((resolve) => {
-    client.on('device', (d) => {
-      if (d.address === serverAddress) resolve(d)
+  let device = [...client.devices.values()].find((d) => d.address === server.address)
+  if (!device) {
+    device = await new Promise((resolve) => {
+      client.on('device', (d) => {
+        if (d.address === server.address) resolve(d)
+      })
     })
-  })
+  }
   client.stopDiscovery()
-  t.pass('server discovered at ' + device.address)
+
+  if (!accept) return { server, client, device, psm }
+
+  const inbound = new Promise((resolve) => server.on('channelOpen', resolve))
 
   device.openL2CAPChannel(psm)
-  const [inbound, outbound] = await Promise.all([
-    new Promise((resolve) => server.on('channelOpen', resolve)),
-    new Promise((resolve, reject) => {
-      device.on('channelOpen', resolve)
-      device.on('error', reject)
-    })
-  ])
-  t.pass('channel open on both sides')
+  const outbound = await new Promise((resolve, reject) => {
+    device.on('channelOpen', resolve)
+    device.on('error', reject)
+  })
+
+  return { server, client, device, psm, inbound: await inbound, outbound }
+}
+
+test('l2cap end to end over virtual controllers', { skip: !vhci, timeout: 30000 }, async (t) => {
+  const { psm, inbound, outbound } = await openPair(t)
+
+  t.ok(psm > 0, 'psm published: 0x' + psm.toString(16))
 
   const fromServer = new Promise((resolve) => outbound.once('data', resolve))
   inbound.write(Buffer.from('ping'))
@@ -53,6 +65,32 @@ test('l2cap end to end over virtual controllers', { skip: !vhci, timeout: 30000 
 
   outbound.destroy()
   inbound.destroy()
+})
 
-  await server.unregisterAdvertisement(ad)
+test('adapter destroy closes accepted channels', { skip: !vhci, timeout: 30000 }, async (t) => {
+  const { server, inbound } = await openPair(t)
+
+  const closed = new Promise((resolve) => inbound.once('close', resolve))
+  server.destroy()
+
+  await closed
+  t.ok(inbound.destroyed, 'accepted channel destroyed with the adapter')
+})
+
+test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, async (t) => {
+  const { device, psm } = await openPair(t, { accept: false })
+
+  device.openL2CAPChannel(psm)
+
+  // Depending on timing the peer teardown surfaces as a short-lived channel
+  // or as a failed open; either proves the server did not keep it
+  const result = await new Promise((resolve) => {
+    device.on('channelOpen', (channel) => {
+      channel.resume()
+      channel.once('close', () => resolve('closed'))
+    })
+    device.on('error', () => resolve('rejected'))
+  })
+
+  t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)
 })
