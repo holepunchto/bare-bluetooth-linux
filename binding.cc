@@ -2757,6 +2757,10 @@ bare_bluetooth_linux_l2cap__on_connect(l2cap_channel_t *channel, int status) {
   err = js_get_reference_value(env, ch->on_channel, callback);
   assert(err == 0);
 
+  // One-shot: the connect callback never fires again, release it so it does
+  // not pin the caller's object graph for the channel's lifetime
+  ch->on_channel.reset();
+
   if (status < 0) {
     js_object_t error;
     err = js_create_error(env, strerror(-status), error);

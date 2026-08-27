@@ -4,14 +4,20 @@ const test = require('brittle')
 const { Adapter, Advertisement } = require('..')
 const { vhci } = require('./helpers')
 
-// The publish/advertise/discover/connect dance shared by every scenario
-async function openPair(t, { accept = true } = {}) {
-  const server = new Adapter({ path: vhci.a })
-  const client = new Adapter({ path: vhci.b })
+// In its own scope so the long-lived teardown closure does not retain the
+// whole openPair context (it would pin the device via context sharing)
+function teardown(t, client, server) {
   t.teardown(() => {
     client.destroy()
     server.destroy()
   })
+}
+
+// The publish/advertise/discover/connect dance shared by every scenario
+async function openPair(t, { accept = true } = {}) {
+  const server = new Adapter({ path: vhci.a })
+  const client = new Adapter({ path: vhci.b })
+  teardown(t, client, server)
 
   server.powered = true
   client.powered = true
@@ -30,9 +36,12 @@ async function openPair(t, { accept = true } = {}) {
   let device = [...client.devices.values()].find((d) => d.address === server.address)
   if (!device) {
     device = await new Promise((resolve) => {
-      client.on('device', (d) => {
-        if (d.address === server.address) resolve(d)
-      })
+      const ondevice = (d) => {
+        if (d.address !== server.address) return
+        client.off('device', ondevice)
+        resolve(d)
+      }
+      client.on('device', ondevice)
     })
   }
   client.stopDiscovery()
@@ -117,5 +126,29 @@ test(
       retry.on('error', reject)
     })
     t.is(psm, 0x81, 'psm rebindable after same-tick destroy')
+  }
+)
+
+// Needs the gc hook: bare --expose-gc node_modules/.bin/brittle-bare <file>
+test(
+  'connect callback does not pin the device',
+  { skip: !vhci || typeof globalThis.gc !== 'function', timeout: 30000 },
+  async (t) => {
+    let { client, device, outbound } = await openPair(t)
+
+    const ref = new WeakRef(device)
+    device = null
+
+    client.destroy() // drops the adapter's device map
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    globalThis.gc()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    globalThis.gc()
+
+    t.is(ref.deref(), undefined, 'device collected while the channel lives on')
+    t.ok(!outbound.destroyed, 'channel still alive without it')
+
+    outbound.destroy()
   }
 )
