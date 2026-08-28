@@ -2812,6 +2812,15 @@ bare_bluetooth_linux_l2cap__on_channel_drain(l2cap_channel_t *channel) {
   bare_bluetooth_linux_l2cap__emit(ch, ch->on_drain);
 }
 
+static int
+bare_bluetooth_linux_l2cap__security_level(const std::string &name) {
+  if (name == "low") return L2CAP_SECURITY_LOW;
+  if (name == "medium") return L2CAP_SECURITY_MEDIUM;
+  if (name == "high") return L2CAP_SECURITY_HIGH;
+  if (name == "fips") return L2CAP_SECURITY_FIPS;
+  return -1;
+}
+
 static void
 bare_bluetooth_linux_device_open_l2cap_channel(
   js_env_t *env,
@@ -2820,6 +2829,7 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   std::string address,
   std::string address_type,
   uint32_t psm,
+  std::optional<std::string> security,
   bare_bluetooth_linux_l2cap__on_channel_fn callback
 ) {
   int err;
@@ -2832,6 +2842,12 @@ bare_bluetooth_linux_device_open_l2cap_channel(
     err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(error), std::optional<js_arraybuffer_t>());
     assert(err != js_pending_exception);
   };
+
+  int level = -1;
+  if (security) {
+    level = bare_bluetooth_linux_l2cap__security_level(*security);
+    if (level < 0) return fail("Unknown security level");
+  }
 
   l2cap_addr_t local_addr;
   if (l2cap_addr_init(local.c_str(), L2CAP_BDADDR_LE_PUBLIC, &local_addr) < 0) {
@@ -2855,6 +2871,15 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   ch->env = env;
 
   l2cap_channel_init(&ch->channel, ch);
+
+  if (level >= 0) {
+    int res = l2cap_channel_set_security(&ch->channel, static_cast<uint8_t>(level));
+    if (res < 0) {
+      const char *message = strerror(-res);
+      ch->~bare_bluetooth_linux_l2cap_t();
+      return fail(message);
+    }
+  }
 
   int res = l2cap_channel_connect(&ch->channel, &local_addr, &peer_addr, static_cast<uint16_t>(psm), bare_bluetooth_linux_l2cap__on_connect);
   if (res < 0) {
@@ -3181,6 +3206,7 @@ bare_bluetooth_linux_l2cap_publish(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   uint32_t psm,
+  std::optional<std::string> security,
   js_object_t context,
   bare_bluetooth_linux_l2cap__on_connection_fn on_connection,
   bare_bluetooth_linux_l2cap__on_server_error_fn on_error,
@@ -3196,6 +3222,12 @@ bare_bluetooth_linux_l2cap_publish(
     err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(error), std::optional<js_arraybuffer_t>());
     assert(err != js_pending_exception);
   };
+
+  int level = -1;
+  if (security) {
+    level = bare_bluetooth_linux_l2cap__security_level(*security);
+    if (level < 0) return fail("Unknown security level");
+  }
 
   auto local = dbus_get_string_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Address");
   if (!local) return fail("Unknown adapter address");
@@ -3215,6 +3247,15 @@ bare_bluetooth_linux_l2cap_publish(
   srv->env = env;
 
   l2cap_server_init(&srv->handle, srv);
+
+  if (level >= 0) {
+    int res = l2cap_server_set_security(&srv->handle, static_cast<uint8_t>(level));
+    if (res < 0) {
+      const char *message = strerror(-res);
+      srv->~bare_bluetooth_linux_l2cap_server_t();
+      return fail(message);
+    }
+  }
 
   int res = l2cap_server_listen(&srv->handle, &local_addr, static_cast<uint16_t>(psm), 4);
   if (res < 0) {
