@@ -2559,7 +2559,7 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
   }
 }
 
-// The L2CAP transport lives in libl2cap (sans-I/O, kernel sockets). This
+// The L2CAP transport lives in libl2cap (I/O agnostic, kernel sockets). This
 // section is only the JS glue: reference lifetimes, teardown, and the uv_poll
 // wiring that drives the library's fd/events/process contract.
 
@@ -2569,8 +2569,10 @@ using bare_bluetooth_linux_l2cap__on_end_fn = js_function_t<void, js_receiver_t>
 using bare_bluetooth_linux_l2cap__on_error_fn = js_function_t<void, js_receiver_t, std::string>;
 using bare_bluetooth_linux_l2cap__on_close_fn = js_function_t<void, js_receiver_t>;
 using bare_bluetooth_linux_l2cap__on_open_fn = js_function_t<void, js_receiver_t>;
-using bare_bluetooth_linux_l2cap__on_channel_fn = js_function_t<void, js_object_t, std::optional<js_arraybuffer_t>>;
+using bare_bluetooth_linux_l2cap__on_channel_fn = js_function_t<void, std::optional<js_object_t>, std::optional<js_arraybuffer_t>>;
 
+// Lives inside an arraybuffer: constructed with placement new and ended with
+// an explicit destructor call - the GC owns the storage, so never delete
 struct bare_bluetooth_linux_l2cap_t {
   js_env_t *env = nullptr;
   l2cap_channel_t channel = {};
@@ -2776,18 +2778,14 @@ bare_bluetooth_linux_l2cap__on_connect(l2cap_channel_t *channel, int status) {
     // environment, destroying the channel beneath us
     bare_bluetooth_linux_l2cap__close(ch);
 
-    err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>());
+    err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(error), std::optional<js_arraybuffer_t>());
     assert(err != js_pending_exception);
   } else {
-    js_object_t error;
-    err = js_get_null(env, error);
-    assert(err == 0);
-
     js_arraybuffer_t handle;
     err = js_get_reference_value(env, ch->self, handle);
     assert(err == 0);
 
-    err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>(handle));
+    err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(), std::optional<js_arraybuffer_t>(handle));
     assert(err != js_pending_exception);
   }
 
@@ -2831,7 +2829,7 @@ bare_bluetooth_linux_device_open_l2cap_channel(
     err = js_create_error(env, message, error);
     assert(err == 0);
 
-    err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>());
+    err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(error), std::optional<js_arraybuffer_t>());
     assert(err != js_pending_exception);
   };
 
@@ -2937,18 +2935,15 @@ bare_bluetooth_linux_l2cap_open(
 ) {
   if (ch->closing || ch->closed) return;
 
-  ch->opened = true;
-
   int err = l2cap_channel_read_start(&ch->channel, bare_bluetooth_linux_l2cap__on_read);
   assert(err == 0);
+
+  ch->opened = true;
 
   bare_bluetooth_linux_l2cap__update_poll(&*ch);
   bare_bluetooth_linux_l2cap__emit(&*ch, ch->on_open);
 }
 
-// Returns the library's contract to JS: 0 sent, 1 queued (the drain callback
-// fires later), negative on error. Errors carry their errno detail through the
-// 'error' event and are fatal to the channel.
 static int32_t
 bare_bluetooth_linux_l2cap_write(
   js_env_t *env,
@@ -3009,18 +3004,20 @@ bare_bluetooth_linux_l2cap_peer(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_t, 1> ch
 ) {
-  char str[18];
+  char str[sizeof("00:00:00:00:00:00")];
   l2cap_addr_to_string(l2cap_channel_peer(&ch->channel), str);
   return str;
 }
 
 using bare_bluetooth_linux_l2cap__on_connection_fn = js_function_t<void, js_receiver_t, js_arraybuffer_t>;
-using bare_bluetooth_linux_l2cap__on_publish_fn = js_function_t<void, js_object_t, std::optional<js_arraybuffer_t>>;
+using bare_bluetooth_linux_l2cap__on_publish_fn = js_function_t<void, std::optional<js_object_t>, std::optional<js_arraybuffer_t>>;
 using bare_bluetooth_linux_l2cap__on_server_error_fn = js_function_t<void, js_receiver_t, uint32_t, std::string>;
 
+// Same lifetime contract as the channel struct: placement new into an
+// arraybuffer, explicit destructor call, storage owned by the GC
 struct bare_bluetooth_linux_l2cap_server_t {
   js_env_t *env = nullptr;
-  l2cap_server_t server = {};
+  l2cap_server_t handle = {};
   uv_poll_t poll;
   bool closing = false;
   bool closed = false;
@@ -3036,7 +3033,7 @@ static void
 bare_bluetooth_linux_l2cap_server__on_poll_close(uv_handle_t *handle) {
   auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(handle->data);
 
-  l2cap_server_close(&srv->server);
+  l2cap_server_close(&srv->handle);
   srv->closed = true;
   srv->closing = false;
 
@@ -3071,7 +3068,7 @@ bare_bluetooth_linux_l2cap_server__on_teardown(js_deferred_teardown_t *, void *d
 
 static void
 bare_bluetooth_linux_l2cap_server__emit_error(bare_bluetooth_linux_l2cap_server_t *srv, uint32_t psm, std::string message) {
-  if (srv->torn_down || srv->ctx == nullptr) return;
+  if (srv->torn_down || srv->closing || srv->closed || srv->ctx == nullptr) return;
 
   int err;
   js_env_t *env = srv->env;
@@ -3099,7 +3096,7 @@ static void
 bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
   auto *srv = reinterpret_cast<bare_bluetooth_linux_l2cap_server_t *>(server->data);
 
-  if (srv->torn_down || srv->ctx == nullptr) return;
+  if (srv->torn_down || srv->closing || srv->closed || srv->ctx == nullptr) return;
 
   int err;
   js_env_t *env = srv->env;
@@ -3119,7 +3116,7 @@ bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
 
   l2cap_channel_init(&ch->channel, ch);
 
-  int res = l2cap_server_accept(&srv->server, &ch->channel);
+  int res = l2cap_server_accept(&srv->handle, &ch->channel);
   if (res < 0) {
     ch->~bare_bluetooth_linux_l2cap_t();
 
@@ -3128,9 +3125,9 @@ bare_bluetooth_linux_l2cap_server__on_connection(l2cap_server_t *server) {
 
     // The library stops accepting on failures that cannot clear on their
     // own; the descriptor stays readable, so polling on would spin
-    if (!l2cap_server_failed(&srv->server)) return;
+    if (!l2cap_server_failed(&srv->handle)) return;
 
-    bare_bluetooth_linux_l2cap_server__emit_error(srv, l2cap_server_psm(&srv->server), strerror(-res));
+    bare_bluetooth_linux_l2cap_server__emit_error(srv, l2cap_server_psm(&srv->handle), strerror(-res));
     bare_bluetooth_linux_l2cap_server__close(srv);
     return;
   }
@@ -3174,7 +3171,7 @@ bare_bluetooth_linux_l2cap_server__on_poll(uv_poll_t *poll, int status, int even
   int fired = 0;
   if (status < 0 || (events & UV_READABLE)) fired = L2CAP_READABLE;
 
-  int err = l2cap_server_process(&srv->server, fired);
+  int err = l2cap_server_process(&srv->handle, fired);
   assert(err == 0);
 }
 
@@ -3196,7 +3193,7 @@ bare_bluetooth_linux_l2cap_publish(
     err = js_create_error(env, message, error);
     assert(err == 0);
 
-    err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>());
+    err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(error), std::optional<js_arraybuffer_t>());
     assert(err != js_pending_exception);
   };
 
@@ -3217,16 +3214,16 @@ bare_bluetooth_linux_l2cap_publish(
 
   srv->env = env;
 
-  l2cap_server_init(&srv->server, srv);
+  l2cap_server_init(&srv->handle, srv);
 
-  int res = l2cap_server_listen(&srv->server, &local_addr, static_cast<uint16_t>(psm), 4);
+  int res = l2cap_server_listen(&srv->handle, &local_addr, static_cast<uint16_t>(psm), 4);
   if (res < 0) {
     const char *message = strerror(-res);
     srv->~bare_bluetooth_linux_l2cap_server_t();
     return fail(message);
   }
 
-  err = l2cap_server_accept_start(&srv->server, bare_bluetooth_linux_l2cap_server__on_connection);
+  err = l2cap_server_accept_start(&srv->handle, bare_bluetooth_linux_l2cap_server__on_connection);
   assert(err == 0);
 
   err = js_create_reference(env, handle, srv->self);
@@ -3248,7 +3245,7 @@ bare_bluetooth_linux_l2cap_publish(
   err = js_get_env_loop(env, &loop);
   assert(err == 0);
 
-  err = uv_poll_init(loop, &srv->poll, l2cap_server_fd(&srv->server));
+  err = uv_poll_init(loop, &srv->poll, l2cap_server_fd(&srv->handle));
   assert(err == 0);
 
   srv->poll.data = srv;
@@ -3256,11 +3253,7 @@ bare_bluetooth_linux_l2cap_publish(
   err = uv_poll_start(&srv->poll, UV_READABLE, bare_bluetooth_linux_l2cap_server__on_poll);
   assert(err == 0);
 
-  js_object_t error;
-  err = js_get_null(env, error);
-  assert(err == 0);
-
-  err = js_call_function_with_checkpoint(env, callback, error, std::optional<js_arraybuffer_t>(handle));
+  err = js_call_function_with_checkpoint(env, callback, std::optional<js_object_t>(), std::optional<js_arraybuffer_t>(handle));
   assert(err != js_pending_exception);
 }
 
@@ -3279,7 +3272,7 @@ bare_bluetooth_linux_l2cap_server_psm(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_l2cap_server_t, 1> srv
 ) {
-  return l2cap_server_psm(&srv->server);
+  return l2cap_server_psm(&srv->handle);
 }
 
 // TODO: bare-tcp exposes socketpair() but hardcodes SOCK_STREAM; once it
