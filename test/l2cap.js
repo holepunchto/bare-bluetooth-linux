@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Device, L2CAPChannel } = require('..')
+const { Adapter, Device, L2CAPChannel, constants } = require('..')
 const binding = require('../binding')
 const { isCI } = require('./helpers')
 
@@ -120,7 +120,7 @@ test('openL2CAPChannel rejects an unknown security level', async (t) => {
     })
   })
 
-  device.openL2CAPChannel(0x80, { security: 'nope' })
+  device.openL2CAPChannel(0x80, { security: 0xff })
 
   await emitted
 })
@@ -137,7 +137,7 @@ test('publishL2CAPChannel rejects an unknown security level', async (t) => {
     })
   })
 
-  adapter.publishL2CAPChannel({ security: 'nope' })
+  adapter.publishL2CAPChannel({ security: 0xff })
 
   await emitted
 })
@@ -149,7 +149,7 @@ test('publishL2CAPChannel accepts a security level', { skip: isCI }, async (t) =
     adapter.on('channelPublish', resolve)
     adapter.on('error', reject)
 
-    adapter.publishL2CAPChannel({ security: 'low' })
+    adapter.publishL2CAPChannel({ security: constants.security.LOW })
   })
 
   t.ok(psm >= 0x80 && psm <= 0xff, 'psm in LE dynamic range: 0x' + psm.toString(16))

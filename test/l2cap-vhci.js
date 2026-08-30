@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Advertisement } = require('..')
+const { Adapter, Advertisement, constants } = require('..')
 const { vhci } = require('./helpers')
 
 function teardown(t, client, server) {
@@ -121,7 +121,7 @@ test(
   'a server requiring encryption refuses an unbonded peer',
   { skip: !vhci, timeout: 30000 },
   async (t) => {
-    const result = await openUnpaired(t, { serverSecurity: 'medium' })
+    const result = await openUnpaired(t, { serverSecurity: constants.security.MEDIUM })
     t.is(result, 'refused', 'server security kept the unbonded peer out')
   }
 )
@@ -133,13 +133,16 @@ test(
   'client security is refused without a paired peer',
   { skip: !vhci, timeout: 30000 },
   async (t) => {
-    const result = await openUnpaired(t, { clientSecurity: 'medium' })
+    const result = await openUnpaired(t, { clientSecurity: constants.security.MEDIUM })
     t.is(result, 'refused', 'unpaired peer with client security is refused')
   }
 )
 
 test('a low security level still connects', { skip: !vhci, timeout: 30000 }, async (t) => {
-  const { outbound } = await openPair(t, { serverSecurity: 'low', clientSecurity: 'low' })
+  const { outbound } = await openPair(t, {
+    serverSecurity: constants.security.LOW,
+    clientSecurity: constants.security.LOW
+  })
 
   t.ok(!outbound.destroyed, 'low is the kernel default and changes nothing')
   outbound.destroy()
