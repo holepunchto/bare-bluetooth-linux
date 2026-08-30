@@ -4,10 +4,21 @@
 # environment to pass to the test run.
 set -e
 
+[ "$(id -u)" -eq 0 ] || { echo "vhci.sh needs root (modprobe, /dev/vhci)" >&2; exit 1; }
+
+# Debian ships btvirt at this path; other distros do not ship it at all, since
+# upstream marks it noinst. Prefer whatever is on PATH, fall back to Debian's.
+btvirt=${BTVIRT:-$(command -v btvirt || echo /usr/libexec/bluetooth/btvirt)}
+[ -x "$btvirt" ] || {
+  echo "btvirt not found at $btvirt" >&2
+  echo "build it from the bluez sources, or set BTVIRT to its path" >&2
+  exit 1
+}
+
 before=" $(ls /sys/class/bluetooth 2>/dev/null | tr '\n' ' ') "
 
 modprobe hci_vhci
-/usr/libexec/bluetooth/btvirt -l2 >/dev/null 2>&1 &
+"$btvirt" -l2 >/dev/null 2>&1 &
 pid=$!
 
 sleep 1
