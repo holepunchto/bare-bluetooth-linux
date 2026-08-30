@@ -9,7 +9,7 @@ function teardown(t, client, server) {
   })
 }
 
-async function openPair(t, { accept = true } = {}) {
+async function openPair(t, { accept = true, serverSecurity, clientSecurity } = {}) {
   const server = new Adapter({ path: vhci.a })
   const client = new Adapter({ path: vhci.b })
   teardown(t, client, server)
@@ -17,7 +17,7 @@ async function openPair(t, { accept = true } = {}) {
   server.powered = true
   client.powered = true
 
-  server.publishL2CAPChannel()
+  server.publishL2CAPChannel({ security: serverSecurity })
   const psm = await new Promise((resolve, reject) => {
     server.on('channelPublish', resolve)
     server.on('error', reject)
@@ -45,7 +45,7 @@ async function openPair(t, { accept = true } = {}) {
 
   const inbound = new Promise((resolve) => server.on('channelOpen', resolve))
 
-  device.openL2CAPChannel(psm)
+  device.openL2CAPChannel(psm, { security: clientSecurity })
   const outbound = await new Promise((resolve, reject) => {
     device.on('channelOpen', resolve)
     device.on('error', reject)
@@ -97,6 +97,47 @@ test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, 
   })
 
   t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)
+})
+
+// The two controllers are never paired, so a level that needs an encrypted
+// link has nothing to work with and the connection must not come up.
+async function openUnpaired(t, opts) {
+  const { device, psm } = await openPair(t, { ...opts, accept: false })
+
+  return new Promise((resolve) => {
+    device.on('channelOpen', (channel) => {
+      channel.destroy()
+      resolve('opened')
+    })
+    device.on('error', () => resolve('refused'))
+
+    device.openL2CAPChannel(psm, { security: opts.clientSecurity })
+  })
+}
+
+test(
+  'a server requiring encryption refuses an unpaired peer',
+  { skip: !vhci, timeout: 30000 },
+  async (t) => {
+    const result = await openUnpaired(t, { serverSecurity: 'medium' })
+    t.is(result, 'refused', 'server security kept the unpaired peer out')
+  }
+)
+
+test(
+  'a client requiring encryption refuses an unpaired peer',
+  { skip: !vhci, timeout: 30000 },
+  async (t) => {
+    const result = await openUnpaired(t, { clientSecurity: 'medium' })
+    t.is(result, 'refused', 'client security refused the unencrypted link')
+  }
+)
+
+test('a low security level still connects', { skip: !vhci, timeout: 30000 }, async (t) => {
+  const { outbound } = await openPair(t, { serverSecurity: 'low', clientSecurity: 'low' })
+
+  t.ok(!outbound.destroyed, 'low is the kernel default and changes nothing')
+  outbound.destroy()
 })
 
 test(
