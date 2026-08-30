@@ -3416,6 +3416,17 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
 
 #undef V
 
+#define V(name, value) \
+  err = js_set_property(env, exports, name, value); \
+  assert(err == 0);
+
+  V("L2CAP_SECURITY_LOW", L2CAP_SECURITY_LOW)
+  V("L2CAP_SECURITY_MEDIUM", L2CAP_SECURITY_MEDIUM)
+  V("L2CAP_SECURITY_HIGH", L2CAP_SECURITY_HIGH)
+  V("L2CAP_SECURITY_FIPS", L2CAP_SECURITY_FIPS)
+
+#undef V
+
   return exports;
 }
 
