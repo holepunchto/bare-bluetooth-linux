@@ -7,7 +7,7 @@ set -e
 before=" $(ls /sys/class/bluetooth 2>/dev/null | tr '\n' ' ') "
 
 modprobe hci_vhci
-/usr/libexec/bluetooth/btvirt -l2 &
+/usr/libexec/bluetooth/btvirt -l2 >/dev/null 2>&1 &
 pid=$!
 
 sleep 1
