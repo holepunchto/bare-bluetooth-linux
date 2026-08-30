@@ -99,8 +99,8 @@ test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, 
   t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)
 })
 
-// The two controllers are never paired, so a level that needs an encrypted
-// link has nothing to work with and the connection must not come up.
+// The rig never bonds the two controllers, which is what makes the two sides
+// behave differently below.
 async function openUnpaired(t, opts) {
   const { device, psm } = await openPair(t, { ...opts, accept: false })
 
@@ -115,21 +115,28 @@ async function openUnpaired(t, opts) {
   })
 }
 
+// l2cap_core.c l2cap_le_connect_req() answers L2CAP_CR_LE_ENCRYPTION (0x0008)
+// when smp_sufficient_security() fails, with no path to accepting anyway.
 test(
-  'a server requiring encryption refuses an unpaired peer',
+  'a server requiring encryption refuses an unbonded peer',
   { skip: !vhci, timeout: 30000 },
   async (t) => {
     const result = await openUnpaired(t, { serverSecurity: 'medium' })
-    t.is(result, 'refused', 'server security kept the unpaired peer out')
+    t.is(result, 'refused', 'server security kept the unbonded peer out')
   }
 )
 
+// Asymmetric on purpose. With no bond there is no stored LTK, so smp.c
+// smp_conn_security() logs "security requested but not available" and returns
+// 1, which l2cap_le_start() reads as "nothing to wait for" and sends the
+// connect request in the clear. Bonded peers take the smp_ltk_encrypt() path
+// above it and are encrypted.
 test(
-  'a client requiring encryption refuses an unpaired peer',
+  'client security does not gate an unbonded link',
   { skip: !vhci, timeout: 30000 },
   async (t) => {
     const result = await openUnpaired(t, { clientSecurity: 'medium' })
-    t.is(result, 'refused', 'client security refused the unencrypted link')
+    t.is(result, 'opened', 'kernel connected in the clear despite the request')
   }
 )
 
