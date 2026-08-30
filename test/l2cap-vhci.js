@@ -126,17 +126,15 @@ test(
   }
 )
 
-// Asymmetric on purpose. With no bond there is no stored LTK, so smp.c
-// smp_conn_security() logs "security requested but not available" and returns
-// 1, which l2cap_le_start() reads as "nothing to wait for" and sends the
-// connect request in the clear. Bonded peers take the smp_ltk_encrypt() path
-// above it and are encrypted.
+// With no bond there is no stored LTK: the kernel would log "security
+// requested but not available" (smp.c smp_conn_security) and connect in the
+// clear, so device.js refuses before reaching the kernel.
 test(
-  'client security does not gate an unbonded link',
+  'client security is refused without a paired peer',
   { skip: !vhci, timeout: 30000 },
   async (t) => {
     const result = await openUnpaired(t, { clientSecurity: 'medium' })
-    t.is(result, 'opened', 'kernel connected in the clear despite the request')
+    t.is(result, 'refused', 'unpaired peer with client security is refused')
   }
 )
 
