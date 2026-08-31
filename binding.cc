@@ -366,10 +366,6 @@ struct bare_bluetooth_linux_adapter_props_changed_event_t {
   std::optional<bool> discovering;
 };
 
-struct bare_bluetooth_linux_tsfn_ctx_t {
-  bare_bluetooth_linux_adapter_t *adapter;
-};
-
 struct bare_bluetooth_linux_async_call_t {
   js_env_t *env;
   js_persistent_t<js_function_t<void, js_object_t>> cb;
@@ -491,6 +487,18 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_gatt_characteristic_write;
   bare_bluetooth_linux_advertisement_t adv;
   bare_bluetooth_linux_gatt_app_t gatt_app;
+};
+
+// Exactly one context per threadsafe function, deleted by the finalizer, so
+// counting them here keeps the finalize count in step with however many
+// threadsafe functions the adapter ends up creating
+struct bare_bluetooth_linux_tsfn_ctx_t {
+  bare_bluetooth_linux_adapter_t *adapter;
+
+  bare_bluetooth_linux_tsfn_ctx_t(bare_bluetooth_linux_adapter_t *adapter)
+      : adapter(adapter) {
+    adapter->tsfn_count.fetch_add(1);
+  }
 };
 
 static void
@@ -1747,7 +1755,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
-  adapter->tsfn_count.store(15);
+  adapter->tsfn_count.store(0);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
