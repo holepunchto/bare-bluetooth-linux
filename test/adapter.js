@@ -106,3 +106,32 @@ test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) =
   t.ok(device)
   t.ok(adapter.devices.has(device.path))
 })
+
+test('powering the adapter emits powered', { skip: isCI, timeout: 10000 }, async (t) => {
+  using adapter = new Adapter()
+
+  const wasPowered = adapter.powered
+  t.teardown(() => {
+    adapter.powered = wasPowered
+  })
+
+  const toggled = new Promise((resolve) => adapter.once('powered', resolve))
+
+  adapter.powered = !wasPowered
+
+  t.is(await toggled, !wasPowered, 'BlueZ signalled the change')
+})
+
+test('discovery emits discovering', { skip: isCI, timeout: 10000 }, async (t) => {
+  using adapter = new Adapter()
+
+  const started = new Promise((resolve) => adapter.once('discovering', resolve))
+
+  adapter.startDiscovery()
+  t.is(await started, true, 'discovery reported as started')
+
+  const stopped = new Promise((resolve) => adapter.once('discovering', resolve))
+
+  adapter.stopDiscovery()
+  t.is(await stopped, false, 'discovery reported as stopped')
+})

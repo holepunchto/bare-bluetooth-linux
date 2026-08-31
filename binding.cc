@@ -361,6 +361,11 @@ struct bare_bluetooth_linux_device_props_changed_event_t {
   std::optional<std::string> name;
 };
 
+struct bare_bluetooth_linux_adapter_props_changed_event_t {
+  std::optional<bool> powered;
+  std::optional<bool> discovering;
+};
+
 struct bare_bluetooth_linux_tsfn_ctx_t {
   bare_bluetooth_linux_adapter_t *adapter;
 };
@@ -415,6 +420,9 @@ using bare_bluetooth_linux__on_char_value_fn =
 
 using bare_bluetooth_linux__on_device_props_changed_fn =
   js_function_t<void, js_receiver_t, std::string, std::optional<bool>, std::optional<bool>, std::optional<bool>, std::optional<int32_t>, std::optional<std::string>>;
+
+using bare_bluetooth_linux__on_adapter_props_changed_fn =
+  js_function_t<void, js_receiver_t, std::optional<bool>, std::optional<bool>>;
 
 using bare_bluetooth_linux__on_adv_released_fn =
   js_function_t<void, js_receiver_t>;
@@ -478,6 +486,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_desc_removed;
   js_threadsafe_function_t *tsfn_char_value;
   js_threadsafe_function_t *tsfn_device_props_changed;
+  js_threadsafe_function_t *tsfn_adapter_props_changed;
   js_threadsafe_function_t *tsfn_adv_released;
   js_threadsafe_function_t *tsfn_gatt_characteristic_write;
   bare_bluetooth_linux_advertisement_t adv;
@@ -731,6 +740,31 @@ bare_bluetooth_linux__on_device_props_changed(
   assert(err == 0);
 
   js_call_function(env, function, js_receiver_t(receiver), event->path, event->connected, event->paired, event->services_resolved, event->rssi, event->name);
+
+  delete event;
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+}
+
+static void
+bare_bluetooth_linux__on_adapter_props_changed(
+  js_env_t *env,
+  bare_bluetooth_linux__on_adapter_props_changed_fn function,
+  bare_bluetooth_linux_tsfn_ctx_t *ctx,
+  bare_bluetooth_linux_adapter_props_changed_event_t *event
+) {
+  int err;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_value_t *receiver;
+  err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
+  assert(err == 0);
+
+  js_call_function(env, function, js_receiver_t(receiver), event->powered, event->discovering);
 
   delete event;
 
@@ -1233,6 +1267,45 @@ bare_bluetooth_linux__on_device_props_changed_signal(bare_bluetooth_linux_adapte
 }
 
 static void
+bare_bluetooth_linux__on_adapter_props_changed_signal(bare_bluetooth_linux_adapter_t *adapter, DBusMessageIter *props_iter) {
+  auto *event = new bare_bluetooth_linux_adapter_props_changed_event_t;
+  bool has_changes = false;
+
+  while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter entry;
+    dbus_message_iter_recurse(props_iter, &entry);
+
+    const char *prop_name;
+    dbus_message_iter_get_basic(&entry, &prop_name);
+    dbus_message_iter_next(&entry);
+
+    DBusMessageIter variant;
+    dbus_message_iter_recurse(&entry, &variant);
+
+    if (strcmp(prop_name, "Powered") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->powered = val;
+      has_changes = true;
+    } else if (strcmp(prop_name, "Discovering") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t val;
+      dbus_message_iter_get_basic(&variant, &val);
+      event->discovering = val;
+      has_changes = true;
+    }
+
+    dbus_message_iter_next(props_iter);
+  }
+
+  if (has_changes) {
+    js_call_threadsafe_function(adapter->tsfn_adapter_props_changed, event, js_threadsafe_function_nonblocking);
+  } else {
+    // No tracked properties changed; free the event since it won't be consumed by the tsfn callback
+    delete event;
+  }
+}
+
+static void
 bare_bluetooth_linux__on_char_value_changed_signal(bare_bluetooth_linux_adapter_t *adapter, const char *obj_path, DBusMessageIter *props_iter) {
   while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
     DBusMessageIter entry;
@@ -1546,6 +1619,15 @@ bare_bluetooth_linux__signal_filter(DBusConnection *conn, DBusMessage *msg, void
     DBusMessageIter props_iter;
     dbus_message_iter_recurse(&args, &props_iter);
 
+    if (strcmp(iface_name, BLUEZ_ADAPTER_IFACE) == 0) {
+      // Only the adapter object itself, not the devices hanging beneath it
+      if (strcmp(obj_path, adapter->adapter_path.c_str()) != 0)
+        return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+
+      bare_bluetooth_linux__on_adapter_props_changed_signal(adapter, &props_iter);
+      return DBUS_HANDLER_RESULT_HANDLED;
+    }
+
     if (strcmp(iface_name, BLUEZ_DEVICE_IFACE) == 0) {
       bare_bluetooth_linux__on_device_props_changed_signal(adapter, obj_path, &props_iter);
       return DBUS_HANDLER_RESULT_HANDLED;
@@ -1611,6 +1693,9 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_device_props_changed, js_threadsafe_function_release);
   assert(err == 0);
 
+  err = js_release_threadsafe_function(adapter->tsfn_adapter_props_changed, js_threadsafe_function_release);
+  assert(err == 0);
+
   err = js_release_threadsafe_function(adapter->tsfn_adv_released, js_threadsafe_function_release);
   assert(err == 0);
 
@@ -1647,6 +1732,7 @@ bare_bluetooth_linux_adapter_init(
   bare_bluetooth_linux__on_desc_removed_fn on_desc_removed,
   bare_bluetooth_linux__on_char_value_fn on_char_value,
   bare_bluetooth_linux__on_device_props_changed_fn on_device_props_changed,
+  bare_bluetooth_linux__on_adapter_props_changed_fn on_adapter_props_changed,
   bare_bluetooth_linux__on_adv_released_fn on_adv_released,
   bare_bluetooth_linux__on_gatt_characteristic_write_fn on_gatt_characteristic_write
 ) {
@@ -1806,6 +1892,14 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux__on_tsfn_finalize,
     bare_bluetooth_linux_tsfn_ctx_t,
     bare_bluetooth_linux_device_props_changed_event_t>(env, on_device_props_changed, 0, 1, device_props_ctx, adapter->tsfn_device_props_changed);
+  assert(err == 0);
+
+  auto *adapter_props_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  err = js_create_threadsafe_function<
+    bare_bluetooth_linux__on_adapter_props_changed,
+    bare_bluetooth_linux__on_tsfn_finalize,
+    bare_bluetooth_linux_tsfn_ctx_t,
+    bare_bluetooth_linux_adapter_props_changed_event_t>(env, on_adapter_props_changed, 0, 1, adapter_props_ctx, adapter->tsfn_adapter_props_changed);
   assert(err == 0);
 
   auto *adv_released_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
