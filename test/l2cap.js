@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Device, L2CAPChannel } = require('..')
+const { Adapter, Device, L2CAPChannel, constants } = require('..')
 const binding = require('../binding')
 const { isCI } = require('./helpers')
 
@@ -105,6 +105,54 @@ test('openL2CAPChannel failure emits error asynchronously', async (t) => {
   sync = false
 
   await emitted
+})
+
+test('openL2CAPChannel rejects an unknown security level', async (t) => {
+  t.plan(1)
+
+  using adapter = new Adapter()
+  const device = new Device(adapter, '/org/bluez/hci0/dev_invalid', '00:11:22:33:44:55')
+
+  const emitted = new Promise((resolve) => {
+    device.on('error', (err) => {
+      t.ok(/security level/.test(err.message), 'rejected: ' + err.message)
+      resolve()
+    })
+  })
+
+  device.openL2CAPChannel(0x80, { security: 0xff })
+
+  await emitted
+})
+
+test('publishL2CAPChannel rejects an unknown security level', async (t) => {
+  t.plan(1)
+
+  using adapter = new Adapter()
+
+  const emitted = new Promise((resolve) => {
+    adapter.on('error', (err) => {
+      t.ok(/security level/.test(err.message), 'rejected: ' + err.message)
+      resolve()
+    })
+  })
+
+  adapter.publishL2CAPChannel({ security: 0xff })
+
+  await emitted
+})
+
+test('publishL2CAPChannel accepts a security level', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const psm = await new Promise((resolve, reject) => {
+    adapter.on('channelPublish', resolve)
+    adapter.on('error', reject)
+
+    adapter.publishL2CAPChannel({ security: constants.security.LOW })
+  })
+
+  t.ok(psm >= 0x80 && psm <= 0xff, 'psm in LE dynamic range: 0x' + psm.toString(16))
 })
 
 test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {

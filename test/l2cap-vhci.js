@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Advertisement } = require('..')
+const { Adapter, Advertisement, constants } = require('..')
 const { vhci } = require('./helpers')
 
 function teardown(t, client, server) {
@@ -9,7 +9,7 @@ function teardown(t, client, server) {
   })
 }
 
-async function openPair(t, { accept = true } = {}) {
+async function openPair(t, { accept = true, serverSecurity, clientSecurity } = {}) {
   const server = new Adapter({ path: vhci.a })
   const client = new Adapter({ path: vhci.b })
   teardown(t, client, server)
@@ -17,7 +17,7 @@ async function openPair(t, { accept = true } = {}) {
   server.powered = true
   client.powered = true
 
-  server.publishL2CAPChannel()
+  server.publishL2CAPChannel({ security: serverSecurity })
   const psm = await new Promise((resolve, reject) => {
     server.on('channelPublish', resolve)
     server.on('error', reject)
@@ -45,7 +45,7 @@ async function openPair(t, { accept = true } = {}) {
 
   const inbound = new Promise((resolve) => server.on('channelOpen', resolve))
 
-  device.openL2CAPChannel(psm)
+  device.openL2CAPChannel(psm, { security: clientSecurity })
   const outbound = await new Promise((resolve, reject) => {
     device.on('channelOpen', resolve)
     device.on('error', reject)
@@ -97,6 +97,55 @@ test('unhandled inbound connection is closed', { skip: !vhci, timeout: 30000 }, 
   })
 
   t.ok(result === 'closed' || result === 'rejected', 'unhandled connection torn down: ' + result)
+})
+
+// The rig never bonds the two controllers, which is what makes the two sides
+// behave differently below.
+async function openUnpaired(t, opts) {
+  const { device, psm } = await openPair(t, { ...opts, accept: false })
+
+  return new Promise((resolve) => {
+    device.on('channelOpen', (channel) => {
+      channel.destroy()
+      resolve('opened')
+    })
+    device.on('error', () => resolve('refused'))
+
+    device.openL2CAPChannel(psm, { security: opts.clientSecurity })
+  })
+}
+
+// l2cap_core.c l2cap_le_connect_req() answers L2CAP_CR_LE_ENCRYPTION (0x0008)
+// when smp_sufficient_security() fails, with no path to accepting anyway.
+test(
+  'a server requiring encryption refuses an unbonded peer',
+  { skip: !vhci, timeout: 30000 },
+  async (t) => {
+    const result = await openUnpaired(t, { serverSecurity: constants.security.MEDIUM })
+    t.is(result, 'refused', 'server security kept the unbonded peer out')
+  }
+)
+
+// With no bond there is no stored LTK: the kernel would log "security
+// requested but not available" (smp.c smp_conn_security) and connect in the
+// clear, so device.js refuses before reaching the kernel.
+test(
+  'client security is refused without a paired peer',
+  { skip: !vhci, timeout: 30000 },
+  async (t) => {
+    const result = await openUnpaired(t, { clientSecurity: constants.security.MEDIUM })
+    t.is(result, 'refused', 'unpaired peer with client security is refused')
+  }
+)
+
+test('a low security level still connects', { skip: !vhci, timeout: 30000 }, async (t) => {
+  const { outbound } = await openPair(t, {
+    serverSecurity: constants.security.LOW,
+    clientSecurity: constants.security.LOW
+  })
+
+  t.ok(!outbound.destroyed, 'low is the kernel default and changes nothing')
+  outbound.destroy()
 })
 
 test(

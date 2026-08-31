@@ -2820,6 +2820,7 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   std::string address,
   std::string address_type,
   uint32_t psm,
+  std::optional<uint32_t> security,
   bare_bluetooth_linux_l2cap__on_channel_fn callback
 ) {
   int err;
@@ -2855,6 +2856,15 @@ bare_bluetooth_linux_device_open_l2cap_channel(
   ch->env = env;
 
   l2cap_channel_init(&ch->channel, ch);
+
+  if (security) {
+    int res = l2cap_channel_set_security(&ch->channel, static_cast<uint8_t>(*security));
+    if (res < 0) {
+      const char *message = strerror(-res);
+      ch->~bare_bluetooth_linux_l2cap_t();
+      return fail(message);
+    }
+  }
 
   int res = l2cap_channel_connect(&ch->channel, &local_addr, &peer_addr, static_cast<uint16_t>(psm), bare_bluetooth_linux_l2cap__on_connect);
   if (res < 0) {
@@ -3181,6 +3191,7 @@ bare_bluetooth_linux_l2cap_publish(
   js_receiver_t,
   js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
   uint32_t psm,
+  std::optional<uint32_t> security,
   js_object_t context,
   bare_bluetooth_linux_l2cap__on_connection_fn on_connection,
   bare_bluetooth_linux_l2cap__on_server_error_fn on_error,
@@ -3215,6 +3226,15 @@ bare_bluetooth_linux_l2cap_publish(
   srv->env = env;
 
   l2cap_server_init(&srv->handle, srv);
+
+  if (security) {
+    int res = l2cap_server_set_security(&srv->handle, static_cast<uint8_t>(*security));
+    if (res < 0) {
+      const char *message = strerror(-res);
+      srv->~bare_bluetooth_linux_l2cap_server_t();
+      return fail(message);
+    }
+  }
 
   int res = l2cap_server_listen(&srv->handle, &local_addr, static_cast<uint16_t>(psm), 4);
   if (res < 0) {
@@ -3393,6 +3413,17 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("l2capPublish", bare_bluetooth_linux_l2cap_publish)
   V("l2capUnpublish", bare_bluetooth_linux_l2cap_unpublish)
   V("l2capServerPsm", bare_bluetooth_linux_l2cap_server_psm)
+
+#undef V
+
+#define V(name, value) \
+  err = js_set_property(env, exports, name, value); \
+  assert(err == 0);
+
+  V("L2CAP_SECURITY_LOW", L2CAP_SECURITY_LOW)
+  V("L2CAP_SECURITY_MEDIUM", L2CAP_SECURITY_MEDIUM)
+  V("L2CAP_SECURITY_HIGH", L2CAP_SECURITY_HIGH)
+  V("L2CAP_SECURITY_FIPS", L2CAP_SECURITY_FIPS)
 
 #undef V
 
