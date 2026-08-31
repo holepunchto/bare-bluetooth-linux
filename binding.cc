@@ -1747,7 +1747,7 @@ bare_bluetooth_linux_adapter_init(
 
   adapter->adapter_path = path;
   adapter->running.store(true);
-  adapter->tsfn_count.store(14);
+  adapter->tsfn_count.store(15);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
   assert(err == 0);
