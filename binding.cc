@@ -469,6 +469,7 @@ struct bare_bluetooth_linux_adapter_t {
   std::atomic<int> tsfn_count;
   uv_thread_t thread;
   uv_async_t cleanup_async;
+  js_deferred_teardown_t *teardown;
   js_ref_t *ctx;
   js_threadsafe_function_t *tsfn_device_added;
   js_threadsafe_function_t *tsfn_device_removed;
@@ -1001,7 +1002,12 @@ bare_bluetooth_linux__on_tsfn_finalize(js_env_t *env, bare_bluetooth_linux_tsfn_
   adapter->conn = nullptr;
   adapter->signal_conn = nullptr;
 
+  auto *teardown = adapter->teardown;
+
   adapter->~bare_bluetooth_linux_adapter_t();
+
+  err = js_finish_deferred_teardown_callback(teardown);
+  assert(err == 0);
 }
 
 static void
@@ -1714,6 +1720,15 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
 }
 
 static void
+bare_bluetooth_linux__on_adapter_teardown(js_deferred_teardown_t *, void *data) {
+  auto *adapter = static_cast<bare_bluetooth_linux_adapter_t *>(data);
+
+  if (!adapter->running.load()) return;
+
+  adapter->running.store(false);
+}
+
+static void
 bare_bluetooth_linux__dbus_thread(void *data) {
   auto *adapter = static_cast<bare_bluetooth_linux_adapter_t *>(data);
 
@@ -1758,6 +1773,9 @@ bare_bluetooth_linux_adapter_init(
   adapter->tsfn_count.store(0);
 
   err = js_create_reference(env, static_cast<js_value_t *>(context), 1, &adapter->ctx);
+  assert(err == 0);
+
+  err = js_add_deferred_teardown_callback(env, bare_bluetooth_linux__on_adapter_teardown, adapter, &adapter->teardown);
   assert(err == 0);
 
   uv_loop_t *loop;
