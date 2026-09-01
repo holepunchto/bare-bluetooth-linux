@@ -38,6 +38,25 @@ test('set powered toggles value', { skip: isCI }, (t) => {
   t.is(adapter.powered, before)
 })
 
+test('accessors after destroy do not reach a closed connection', async (t) => {
+  const adapter = new Adapter()
+  adapter.destroy()
+
+  // The teardown chain closes the D-Bus connections a few loop turns later
+  await new Promise((resolve) => setTimeout(resolve, 500))
+
+  t.is(adapter.powered, undefined, 'powered')
+  t.is(adapter.discovering, undefined, 'discovering')
+  t.is(adapter.address, undefined, 'address')
+
+  t.execution(() => {
+    adapter.powered = true
+    adapter.setDiscoveryFilter({ rssi: -70 })
+    adapter.startDiscovery()
+    adapter.stopDiscovery()
+  })
+})
+
 test('destroy is idempotent', (t) => {
   const adapter = new Adapter()
   t.execution(() => {
@@ -108,11 +127,14 @@ test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) =
 })
 
 test('powering the adapter emits powered', { skip: isCI, timeout: 10000 }, async (t) => {
-  using adapter = new Adapter()
+  // Not `using`: disposal runs before t.teardown, and restoring power needs a
+  // live adapter
+  const adapter = new Adapter()
 
   const wasPowered = adapter.powered
   t.teardown(() => {
     adapter.powered = wasPowered
+    adapter.destroy()
   })
 
   const toggled = new Promise((resolve) => adapter.once('powered', resolve))
