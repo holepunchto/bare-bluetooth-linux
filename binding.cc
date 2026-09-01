@@ -192,7 +192,7 @@ dbus_find_string_in_props(DBusMessageIter *props_iter, const char *target_prop) 
 }
 
 static void
-dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
+dbus_set_bool_prop(js_env_t *env, DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Set");
 
@@ -214,8 +214,12 @@ dbus_set_bool_prop(DBusConnection *conn, const char *path, const char *iface, co
 
   if (reply)
     dbus_message_unref(reply);
-  if (dbus_error_is_set(&err))
+
+  if (dbus_error_is_set(&err)) {
+    int res = js_throw_error(env, nullptr, err.message);
+    assert(res == 0);
     dbus_error_free(&err);
+  }
 }
 
 static void
@@ -1973,7 +1977,7 @@ static void
 bare_bluetooth_linux_adapter_set_powered(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, bool value
 ) {
-  dbus_set_bool_prop(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered", value);
+  dbus_set_bool_prop(env, adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered", value);
 }
 
 static bool
