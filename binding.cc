@@ -1231,9 +1231,15 @@ bare_bluetooth_linux__on_interfaces_removed(bare_bluetooth_linux_adapter_t *adap
 
 static void
 bare_bluetooth_linux__on_device_props_changed_signal(bare_bluetooth_linux_adapter_t *adapter, const char *obj_path, DBusMessageIter *props_iter) {
-  auto *event = new bare_bluetooth_linux_device_props_changed_event_t;
-  event->path = obj_path;
-  bool has_changes = false;
+  bare_bluetooth_linux_device_props_changed_event_t *event = nullptr;
+
+  auto track = [&]() {
+    if (event == nullptr) {
+      event = new bare_bluetooth_linux_device_props_changed_event_t;
+      event->path = obj_path;
+    }
+    return event;
+  };
 
   while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
     DBusMessageIter entry;
@@ -1249,45 +1255,41 @@ bare_bluetooth_linux__on_device_props_changed_signal(bare_bluetooth_linux_adapte
     if (strcmp(prop_name, "Connected") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
       dbus_bool_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->connected = val;
-      has_changes = true;
+      track()->connected = val;
     } else if (strcmp(prop_name, "Paired") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
       dbus_bool_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->paired = val;
-      has_changes = true;
+      track()->paired = val;
     } else if (strcmp(prop_name, "ServicesResolved") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
       dbus_bool_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->services_resolved = val;
-      has_changes = true;
+      track()->services_resolved = val;
     } else if (strcmp(prop_name, "RSSI") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_INT16) {
       int16_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->rssi = val;
-      has_changes = true;
+      track()->rssi = val;
     } else if (strcmp(prop_name, "Name") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_STRING) {
       const char *val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->name = val;
-      has_changes = true;
+      track()->name = val;
     }
 
     dbus_message_iter_next(props_iter);
   }
 
-  if (has_changes) {
+  if (event) {
     js_call_threadsafe_function(adapter->tsfn_device_props_changed, event, js_threadsafe_function_nonblocking);
-  } else {
-    // No tracked properties changed; free the event since it won't be consumed by the tsfn callback
-    delete event;
   }
 }
 
 static void
 bare_bluetooth_linux__on_adapter_props_changed_signal(bare_bluetooth_linux_adapter_t *adapter, DBusMessageIter *props_iter) {
-  auto *event = new bare_bluetooth_linux_adapter_props_changed_event_t;
-  bool has_changes = false;
+  bare_bluetooth_linux_adapter_props_changed_event_t *event = nullptr;
+
+  auto track = [&]() {
+    if (event == nullptr) event = new bare_bluetooth_linux_adapter_props_changed_event_t;
+    return event;
+  };
 
   while (dbus_message_iter_get_arg_type(props_iter) == DBUS_TYPE_DICT_ENTRY) {
     DBusMessageIter entry;
@@ -1303,23 +1305,18 @@ bare_bluetooth_linux__on_adapter_props_changed_signal(bare_bluetooth_linux_adapt
     if (strcmp(prop_name, "Powered") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
       dbus_bool_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->powered = val;
-      has_changes = true;
+      track()->powered = val;
     } else if (strcmp(prop_name, "Discovering") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_BOOLEAN) {
       dbus_bool_t val;
       dbus_message_iter_get_basic(&variant, &val);
-      event->discovering = val;
-      has_changes = true;
+      track()->discovering = val;
     }
 
     dbus_message_iter_next(props_iter);
   }
 
-  if (has_changes) {
+  if (event) {
     js_call_threadsafe_function(adapter->tsfn_adapter_props_changed, event, js_threadsafe_function_nonblocking);
-  } else {
-    // No tracked properties changed; free the event since it won't be consumed by the tsfn callback
-    delete event;
   }
 }
 
