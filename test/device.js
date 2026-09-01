@@ -32,6 +32,20 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(typeof device.servicesResolved === 'boolean')
 })
 
+test('device emits rssi', { skip: isCI, timeout: 20000 }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  const rssi = await new Promise((resolve) => {
+    adapter.on('device', (device) => device.once('rssi', resolve))
+  })
+
+  adapter.stopDiscovery()
+
+  t.is(typeof rssi, 'number', 'rssi: ' + rssi)
+})
+
 test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
