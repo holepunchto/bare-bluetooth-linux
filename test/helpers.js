@@ -11,9 +11,16 @@ exports.vhci =
 
 exports.poweredAdapter = function poweredAdapter() {
   const adapter = new Adapter()
-  // Powers the controller on, unless Bluetooth is off on the device itself
-  adapter.powered = true
-  const powered = adapter.powered
+  let powered = false
+
+  try {
+    // Powers the controller on, unless Bluetooth is off on the device itself
+    adapter.powered = true
+    powered = adapter.powered
+  } catch {
+    // BlueZ refused outright, so it stays off
+  }
+
   adapter.destroy()
   return powered
 }

@@ -38,6 +38,14 @@ test('set powered toggles value', { skip: isCI }, (t) => {
   t.is(adapter.powered, before)
 })
 
+test('set powered surfaces a BlueZ error', (t) => {
+  using adapter = new Adapter({ path: '/org/bluez/hci9' })
+
+  t.exception(() => {
+    adapter.powered = true
+  })
+})
+
 test('accessors after destroy do not reach a closed connection', async (t) => {
   const adapter = new Adapter()
   adapter.destroy()
