@@ -433,6 +433,7 @@ struct bare_bluetooth_linux_advertisement_t {
   std::string type;
   std::optional<std::string> local_name;
   std::vector<std::string> service_uuids;
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> service_data;
 };
 
 struct bare_bluetooth_linux_local_characteristic_t {
@@ -1354,6 +1355,32 @@ bare_bluetooth_linux__on_char_value_changed_signal(bare_bluetooth_linux_adapter_
   }
 }
 
+static void
+dbus_dict_append_byte_array_dict(DBusMessageIter *dict, const char *key, const std::vector<std::pair<std::string, std::vector<uint8_t>>> &entries) {
+  DBusMessageIter entry, variant, map;
+  dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
+  dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
+  dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "a{sv}", &variant);
+  dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "{sv}", &map);
+  for (const auto &[uuid, data] : entries) {
+    DBusMessageIter map_entry, value_variant, array;
+    dbus_message_iter_open_container(&map, DBUS_TYPE_DICT_ENTRY, nullptr, &map_entry);
+    const char *uuid_str = uuid.c_str();
+    dbus_message_iter_append_basic(&map_entry, DBUS_TYPE_STRING, &uuid_str);
+    dbus_message_iter_open_container(&map_entry, DBUS_TYPE_VARIANT, "ay", &value_variant);
+    dbus_message_iter_open_container(&value_variant, DBUS_TYPE_ARRAY, "y", &array);
+    for (const auto &b : data) {
+      dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &b);
+    }
+    dbus_message_iter_close_container(&value_variant, &array);
+    dbus_message_iter_close_container(&map_entry, &value_variant);
+    dbus_message_iter_close_container(&map, &map_entry);
+  }
+  dbus_message_iter_close_container(&variant, &map);
+  dbus_message_iter_close_container(&entry, &variant);
+  dbus_message_iter_close_container(dict, &entry);
+}
+
 static DBusHandlerResult
 bare_bluetooth_linux__advertisement_message_handler(
   DBusConnection *conn, DBusMessage *msg, void *user_data
@@ -1374,6 +1401,10 @@ bare_bluetooth_linux__advertisement_message_handler(
 
     if (!adapter->adv.service_uuids.empty()) {
       dbus_dict_append_string_array(&dict, "ServiceUUIDs", adapter->adv.service_uuids);
+    }
+
+    if (!adapter->adv.service_data.empty()) {
+      dbus_dict_append_byte_array_dict(&dict, "ServiceData", adapter->adv.service_data);
     }
 
     dbus_message_iter_close_container(&iter, &dict);
@@ -2480,11 +2511,24 @@ bare_bluetooth_linux_advertisement_register(
   std::string type,
   std::vector<std::string> service_uuids,
   std::optional<std::string> local_name,
+  std::vector<std::tuple<std::string, js_typedarray_t<uint8_t>>> service_data,
   js_function_t<void, js_object_t> callback
 ) {
   adapter->adv.type = type;
   adapter->adv.service_uuids = service_uuids;
   adapter->adv.local_name = local_name;
+
+  int err;
+
+  adapter->adv.service_data.clear();
+  for (auto &[uuid, value] : service_data) {
+    uint8_t *bytes;
+    size_t len;
+    err = js_get_typedarray_info(env, value, bytes, len);
+    assert(err == 0);
+
+    adapter->adv.service_data.emplace_back(uuid, std::vector<uint8_t>(bytes, bytes + len));
+  }
 
   dbus_connection_register_object_path(
     adapter->signal_conn, BLUEZ_ADV_PATH, &bare_bluetooth_linux__adv_vtable, &*adapter
@@ -2494,7 +2538,6 @@ bare_bluetooth_linux_advertisement_register(
   call->env = env;
   call->adapter = &*adapter;
 
-  int err;
   err = js_create_reference(env, callback, call->cb);
   assert(err == 0);
 
