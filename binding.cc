@@ -1469,6 +1469,27 @@ dbus_dict_append_byte_array(DBusMessageIter *dict, const char *key, const std::v
 }
 
 static void
+bare_bluetooth_linux__gatt_emit_value_changed(DBusConnection *conn, const char *path, const std::vector<uint8_t> &value) {
+  DBusMessage *msg = dbus_message_new_signal(path, DBUS_PROP_IFACE, "PropertiesChanged");
+
+  DBusMessageIter iter, dict, invalidated;
+  dbus_message_iter_init_append(msg, &iter);
+
+  const char *iface = BLUEZ_GATT_CHAR_IFACE;
+  dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &iface);
+
+  dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
+  dbus_dict_append_byte_array(&dict, "Value", value);
+  dbus_message_iter_close_container(&iter, &dict);
+
+  dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "s", &invalidated);
+  dbus_message_iter_close_container(&iter, &invalidated);
+
+  dbus_connection_send(conn, msg, nullptr);
+  dbus_message_unref(msg);
+}
+
+static void
 bare_bluetooth_linux__gatt_append_service_props(DBusMessageIter *dict, const bare_bluetooth_linux_local_service_t &svc, const char *uuid_key, const char *primary_key) {
   dbus_dict_append_string(dict, uuid_key, svc.uuid.c_str());
   dbus_bool_t primary = svc.primary ? TRUE : FALSE;
@@ -2717,6 +2738,8 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
         assert(err == 0);
 
         ch.value.assign(data, data + len);
+
+        bare_bluetooth_linux__gatt_emit_value_changed(adapter->signal_conn, ch.path.c_str(), ch.value);
         return;
       }
     }
