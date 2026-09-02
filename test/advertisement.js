@@ -18,11 +18,13 @@ test('advertisement accepts options', (t) => {
   const ad = new Advertisement({
     type: 'broadcast',
     localName: 'TestDevice',
-    serviceUUIDs: ['180a', '180d']
+    serviceUUIDs: ['180a', '180d'],
+    serviceData: { '180a': new Uint8Array([1, 2, 3]) }
   })
   t.is(ad.type, 'broadcast')
   t.is(ad.localName, 'TestDevice')
   t.alike(ad.serviceUUIDs, ['180a', '180d'])
+  t.alike(ad.serviceData, { '180a': new Uint8Array([1, 2, 3]) })
 })
 
 test('register and unregister advertisement', { skip: isCI, timeout: 10000 }, async (t) => {
@@ -31,7 +33,8 @@ test('register and unregister advertisement', { skip: isCI, timeout: 10000 }, as
   const ad = new Advertisement({
     type: 'peripheral',
     localName: 'BareTest',
-    serviceUUIDs: ['180a']
+    serviceUUIDs: ['180a'],
+    serviceData: { '0000180a-0000-1000-8000-00805f9b34fb': new Uint8Array([0xba, 0xde]) }
   })
 
   await adapter.registerAdvertisement(ad)
