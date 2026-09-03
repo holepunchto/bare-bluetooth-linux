@@ -463,14 +463,21 @@ struct bare_bluetooth_linux_gatt_app_t {
   std::unordered_map<uint32_t, DBusMessage *> pending_reads;
 };
 
+struct bare_bluetooth_linux_gatt_options_t {
+  uint32_t offset = 0;
+  std::string device;
+};
+
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
   std::string path;
   std::vector<uint8_t> value;
+  bare_bluetooth_linux_gatt_options_t options;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_read_event_t {
   std::string path;
   uint32_t id;
+  bare_bluetooth_linux_gatt_options_t options;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_notifying_event_t {
@@ -479,13 +486,13 @@ struct bare_bluetooth_linux_gatt_characteristic_notifying_event_t {
 };
 
 using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
-  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t>;
+  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t, uint32_t, std::string>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_notifying_fn =
   js_function_t<void, js_receiver_t, std::string, bool>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_read_fn =
-  js_function_t<void, js_receiver_t, std::string, uint32_t>;
+  js_function_t<void, js_receiver_t, std::string, uint32_t, uint32_t, std::string>;
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
@@ -851,7 +858,7 @@ bare_bluetooth_linux__on_gatt_characteristic_read(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id, static_cast<uint32_t>(event->options.offset), event->options.device);
 
   delete event;
 
@@ -905,7 +912,7 @@ bare_bluetooth_linux__on_gatt_characteristic_write(
   err = js_create_arraybuffer(env, event->value, buffer);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer, static_cast<uint32_t>(event->options.offset), event->options.device);
 
   delete event;
 
@@ -1547,6 +1554,38 @@ dbus_dict_append_byte_array(DBusMessageIter *dict, const char *key, const std::v
   dbus_message_iter_close_container(dict, &entry);
 }
 
+static bare_bluetooth_linux_gatt_options_t
+bare_bluetooth_linux__gatt_options(DBusMessageIter *iter) {
+  bare_bluetooth_linux_gatt_options_t options;
+
+  if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_ARRAY) return options;
+
+  DBusMessageIter dict;
+  dbus_message_iter_recurse(iter, &dict);
+
+  while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
+    DBusMessageIter entry, variant;
+    dbus_message_iter_recurse(&dict, &entry);
+
+    const char *key;
+    dbus_message_iter_get_basic(&entry, &key);
+    dbus_message_iter_next(&entry);
+    dbus_message_iter_recurse(&entry, &variant);
+
+    if (strcmp(key, "offset") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_UINT16) {
+      dbus_message_iter_get_basic(&variant, &options.offset);
+    } else if (strcmp(key, "device") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_OBJECT_PATH) {
+      const char *device;
+      dbus_message_iter_get_basic(&variant, &device);
+      options.device = device;
+    }
+
+    dbus_message_iter_next(&dict);
+  }
+
+  return options;
+}
+
 static void
 bare_bluetooth_linux__gatt_emit_value_changed(DBusConnection *conn, const char *path, const std::vector<uint8_t> &value) {
   DBusMessage *msg = dbus_message_new_signal(path, DBUS_PROP_IFACE, "PropertiesChanged");
@@ -1679,6 +1718,10 @@ bare_bluetooth_linux__gatt_message_handler(
     if (it != adapter->gatt_app.characteristic_map.end()) {
       uint32_t id = dbus_message_get_serial(msg);
 
+      bare_bluetooth_linux_gatt_options_t options;
+      DBusMessageIter args;
+      if (dbus_message_iter_init(msg, &args)) options = bare_bluetooth_linux__gatt_options(&args);
+
       {
         std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
         adapter->gatt_app.pending_reads[id] = dbus_message_ref(msg);
@@ -1687,6 +1730,7 @@ bare_bluetooth_linux__gatt_message_handler(
       auto *event = new bare_bluetooth_linux_gatt_characteristic_read_event_t;
       event->path = path;
       event->id = id;
+      event->options = options;
       js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_read, event, js_threadsafe_function_nonblocking);
 
       return DBUS_HANDLER_RESULT_HANDLED;
@@ -1714,9 +1758,12 @@ bare_bluetooth_linux__gatt_message_handler(
       dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
       ch.value.assign(bytes, bytes + len);
 
+      dbus_message_iter_next(&args);
+
       auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
       event->path = path;
       event->value.assign(bytes, bytes + len);
+      event->options = bare_bluetooth_linux__gatt_options(&args);
       js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
 
       DBusMessage *reply = dbus_message_new_method_return(msg);
