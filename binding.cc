@@ -5,6 +5,7 @@
 #include <js.h>
 #include <jstl.h>
 #include <l2cap.h>
+#include <mutex>
 #include <optional>
 #include <string.h>
 #include <string>
@@ -457,11 +458,19 @@ struct bare_bluetooth_linux_gatt_app_t {
   std::vector<bare_bluetooth_linux_local_service_t> services;
   std::unordered_map<std::string, bare_bluetooth_linux_local_service_t *> service_map;
   std::unordered_map<std::string, bare_bluetooth_linux_local_characteristic_t *> characteristic_map;
+
+  std::mutex reads_lock;
+  std::unordered_map<uint32_t, DBusMessage *> pending_reads;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
   std::string path;
   std::vector<uint8_t> value;
+};
+
+struct bare_bluetooth_linux_gatt_characteristic_read_event_t {
+  std::string path;
+  uint32_t id;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_notifying_event_t {
@@ -474,6 +483,9 @@ using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
 
 using bare_bluetooth_linux__on_gatt_characteristic_notifying_fn =
   js_function_t<void, js_receiver_t, std::string, bool>;
+
+using bare_bluetooth_linux__on_gatt_characteristic_read_fn =
+  js_function_t<void, js_receiver_t, std::string, uint32_t>;
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
@@ -501,6 +513,7 @@ struct bare_bluetooth_linux_adapter_t {
   js_threadsafe_function_t *tsfn_adv_released;
   js_threadsafe_function_t *tsfn_gatt_characteristic_write;
   js_threadsafe_function_t *tsfn_gatt_characteristic_notifying;
+  js_threadsafe_function_t *tsfn_gatt_characteristic_read;
   bare_bluetooth_linux_advertisement_t adv;
   bare_bluetooth_linux_gatt_app_t gatt_app;
 };
@@ -822,6 +835,31 @@ bare_bluetooth_linux__on_adv_released(
 }
 
 static void
+bare_bluetooth_linux__on_gatt_characteristic_read(
+  js_env_t *env,
+  bare_bluetooth_linux__on_gatt_characteristic_read_fn function,
+  bare_bluetooth_linux_tsfn_ctx_t *ctx,
+  bare_bluetooth_linux_gatt_characteristic_read_event_t *event
+) {
+  int err;
+
+  js_handle_scope_t *scope;
+  err = js_open_handle_scope(env, &scope);
+  assert(err == 0);
+
+  js_value_t *receiver;
+  err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
+  assert(err == 0);
+
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id);
+
+  delete event;
+
+  err = js_close_handle_scope(env, scope);
+  assert(err == 0);
+}
+
+static void
 bare_bluetooth_linux__on_gatt_characteristic_notifying(
   js_env_t *env,
   bare_bluetooth_linux__on_gatt_characteristic_notifying_fn function,
@@ -901,6 +939,12 @@ bare_bluetooth_linux__on_gatt_unregister_notify(DBusPendingCall *pending, void *
     adapter->gatt_app.services.clear();
     adapter->gatt_app.service_map.clear();
     adapter->gatt_app.characteristic_map.clear();
+
+    std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
+    for (auto &[id, msg] : adapter->gatt_app.pending_reads) {
+      dbus_message_unref(msg);
+    }
+    adapter->gatt_app.pending_reads.clear();
   }
 
   js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
@@ -1633,17 +1677,18 @@ bare_bluetooth_linux__gatt_message_handler(
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "ReadValue")) {
     auto it = adapter->gatt_app.characteristic_map.find(path);
     if (it != adapter->gatt_app.characteristic_map.end()) {
-      auto &ch = *it->second;
-      DBusMessage *reply = dbus_message_new_method_return(msg);
-      DBusMessageIter iter, array;
-      dbus_message_iter_init_append(reply, &iter);
-      dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array);
-      for (const auto &b : ch.value) {
-        dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &b);
+      uint32_t id = dbus_message_get_serial(msg);
+
+      {
+        std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
+        adapter->gatt_app.pending_reads[id] = dbus_message_ref(msg);
       }
-      dbus_message_iter_close_container(&iter, &array);
-      dbus_connection_send(conn, reply, nullptr);
-      dbus_message_unref(reply);
+
+      auto *event = new bare_bluetooth_linux_gatt_characteristic_read_event_t;
+      event->path = path;
+      event->id = id;
+      js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_read, event, js_threadsafe_function_nonblocking);
+
       return DBUS_HANDLER_RESULT_HANDLED;
     }
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
@@ -1832,6 +1877,9 @@ bare_bluetooth_linux__on_cleanup(uv_async_t *async) {
   err = js_release_threadsafe_function(adapter->tsfn_gatt_characteristic_notifying, js_threadsafe_function_release);
   assert(err == 0);
 
+  err = js_release_threadsafe_function(adapter->tsfn_gatt_characteristic_read, js_threadsafe_function_release);
+  assert(err == 0);
+
   uv_close(reinterpret_cast<uv_handle_t *>(async), bare_bluetooth_linux__on_cleanup_close);
 }
 
@@ -1874,7 +1922,8 @@ bare_bluetooth_linux_adapter_init(
   bare_bluetooth_linux__on_adapter_props_changed_fn on_adapter_props_changed,
   bare_bluetooth_linux__on_adv_released_fn on_adv_released,
   bare_bluetooth_linux__on_gatt_characteristic_write_fn on_gatt_characteristic_write,
-  bare_bluetooth_linux__on_gatt_characteristic_notifying_fn on_gatt_characteristic_notifying
+  bare_bluetooth_linux__on_gatt_characteristic_notifying_fn on_gatt_characteristic_notifying,
+  bare_bluetooth_linux__on_gatt_characteristic_read_fn on_gatt_characteristic_read
 ) {
   dbus_threads_init_default();
 
@@ -2067,6 +2116,14 @@ bare_bluetooth_linux_adapter_init(
     bare_bluetooth_linux__on_tsfn_finalize,
     bare_bluetooth_linux_tsfn_ctx_t,
     bare_bluetooth_linux_gatt_characteristic_notifying_event_t>(env, on_gatt_characteristic_notifying, 0, 1, gatt_characteristic_notifying_ctx, adapter->tsfn_gatt_characteristic_notifying);
+  assert(err == 0);
+
+  auto *gatt_characteristic_read_ctx = new bare_bluetooth_linux_tsfn_ctx_t{adapter};
+  err = js_create_threadsafe_function<
+    bare_bluetooth_linux__on_gatt_characteristic_read,
+    bare_bluetooth_linux__on_tsfn_finalize,
+    bare_bluetooth_linux_tsfn_ctx_t,
+    bare_bluetooth_linux_gatt_characteristic_read_event_t>(env, on_gatt_characteristic_read, 0, 1, gatt_characteristic_read_ctx, adapter->tsfn_gatt_characteristic_read);
   assert(err == 0);
 
   bare_bluetooth_linux__sync_existing_objects(adapter);
@@ -2816,6 +2873,39 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
       }
     }
   }
+}
+
+static void
+bare_bluetooth_linux_gatt_characteristic_respond_read(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, js_typedarray_t<uint8_t> value
+) {
+  DBusMessage *msg = nullptr;
+
+  {
+    std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
+    auto it = adapter->gatt_app.pending_reads.find(id);
+    if (it == adapter->gatt_app.pending_reads.end()) return;
+    msg = it->second;
+    adapter->gatt_app.pending_reads.erase(it);
+  }
+
+  uint8_t *data;
+  size_t len;
+  int err = js_get_typedarray_info(env, value, data, len);
+  assert(err == 0);
+
+  DBusMessage *reply = dbus_message_new_method_return(msg);
+  DBusMessageIter iter, array;
+  dbus_message_iter_init_append(reply, &iter);
+  dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array);
+  for (size_t i = 0; i < len; i++) {
+    dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &data[i]);
+  }
+  dbus_message_iter_close_container(&iter, &array);
+
+  dbus_connection_send(adapter->signal_conn, reply, nullptr);
+  dbus_message_unref(reply);
+  dbus_message_unref(msg);
 }
 
 // The L2CAP transport lives in libl2cap (I/O agnostic, kernel sockets). This
@@ -3658,6 +3748,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("gattRegister", bare_bluetooth_linux_gatt_register)
   V("gattUnregister", bare_bluetooth_linux_gatt_unregister)
   V("gattCharacteristicSetValue", bare_bluetooth_linux_gatt_characteristic_set_value)
+  V("gattCharacteristicRespondRead", bare_bluetooth_linux_gatt_characteristic_respond_read)
 
   V("l2capInit", bare_bluetooth_linux_l2cap_init)
   V("l2capOpen", bare_bluetooth_linux_l2cap_open)
