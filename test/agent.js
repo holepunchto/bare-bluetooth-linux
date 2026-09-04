@@ -59,6 +59,37 @@ test('registerAgent rejects an unknown capability', { skip: isCI }, async (t) =>
   await t.exception(() => adapter.registerAgent(agent, 'Telepathy'))
 })
 
+test('registerAgent recovers from a failed registration', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  await t.exception(() => adapter.registerAgent(agent, 'Telepathy'))
+
+  await adapter.registerAgent(agent, 'NoInputNoOutput')
+  t.pass('registered after the failure')
+
+  await adapter.unregisterAgent()
+})
+
+test('registerAgent works again after unregistering', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  await adapter.registerAgent(agent, 'NoInputNoOutput')
+  await adapter.unregisterAgent()
+
+  await adapter.registerAgent(agent, 'NoInputNoOutput')
+  t.pass('registered a second time')
+
+  await adapter.unregisterAgent()
+})
+
+test('destroy releases a registered agent', { skip: isCI }, async (t) => {
+  const adapter = new Adapter()
+
+  await adapter.registerAgent(agent, 'NoInputNoOutput')
+
+  t.execution(() => adapter.destroy())
+})
+
 test('Agent is exported', (t) => {
   t.is(typeof Agent, 'function')
   t.is(Agent.name, 'Agent')

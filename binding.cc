@@ -1885,25 +1885,35 @@ bare_bluetooth_linux__agent_message_handler(
   dbus_uint16_t entered = 0;
   bool deferred;
 
+  dbus_bool_t ok;
+
   if (strcmp(member, "Release") == 0 || strcmp(member, "Cancel") == 0) {
+    ok = TRUE;
     deferred = false;
   } else if (strcmp(member, "DisplayPinCode") == 0) {
-    dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
     deferred = false;
   } else if (strcmp(member, "DisplayPasskey") == 0) {
-    dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_UINT16, &entered, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_UINT16, &entered, DBUS_TYPE_INVALID);
     deferred = false;
   } else if (strcmp(member, "RequestPinCode") == 0 || strcmp(member, "RequestPasskey") == 0 || strcmp(member, "RequestAuthorization") == 0) {
-    dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_INVALID);
     deferred = true;
   } else if (strcmp(member, "RequestConfirmation") == 0) {
-    dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_INVALID);
     deferred = true;
   } else if (strcmp(member, "AuthorizeService") == 0) {
-    dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
     deferred = true;
   } else {
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+  }
+
+  if (!ok) {
+    DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Unexpected arguments");
+    dbus_connection_send(conn, error, nullptr);
+    dbus_message_unref(error);
+    return DBUS_HANDLER_RESULT_HANDLED;
   }
 
   auto *event = new bare_bluetooth_linux_agent_request_event_t;
@@ -3100,6 +3110,58 @@ bare_bluetooth_linux_gatt_characteristic_respond_read(
   dbus_message_unref(msg);
 }
 
+static void
+bare_bluetooth_linux__agent_cleanup(bare_bluetooth_linux_adapter_t *adapter) {
+  if (adapter->agent_path.empty()) return;
+
+  {
+    std::lock_guard<std::mutex> guard(adapter->agent_lock);
+
+    for (auto &[id, msg] : adapter->agent_requests) {
+      DBusMessage *reply = dbus_message_new_error(msg, "org.bluez.Error.Canceled", "Agent unregistered");
+      dbus_connection_send(adapter->signal_conn, reply, nullptr);
+      dbus_message_unref(reply);
+      dbus_message_unref(msg);
+    }
+    adapter->agent_requests.clear();
+  }
+
+  dbus_connection_unregister_object_path(adapter->signal_conn, adapter->agent_path.c_str());
+  adapter->agent_path.clear();
+}
+
+static void
+bare_bluetooth_linux__on_agent_register_notify(DBusPendingCall *pending, void *data) {
+  auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
+
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  DBUS_EXTRACT_ERROR(reply, call->error);
+
+  dbus_message_unref(reply);
+  dbus_pending_call_unref(pending);
+
+  auto *adapter = call->adapter;
+  if (call->error) bare_bluetooth_linux__agent_cleanup(adapter);
+
+  js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
+}
+
+static void
+bare_bluetooth_linux__on_agent_unregister_notify(DBusPendingCall *pending, void *data) {
+  auto *call = static_cast<bare_bluetooth_linux_async_call_t *>(data);
+
+  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
+  DBUS_EXTRACT_ERROR(reply, call->error);
+
+  dbus_message_unref(reply);
+  dbus_pending_call_unref(pending);
+
+  auto *adapter = call->adapter;
+  bare_bluetooth_linux__agent_cleanup(adapter);
+
+  js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
+}
+
 static DBusMessage *
 bare_bluetooth_linux__agent_take(bare_bluetooth_linux_adapter_t *adapter, uint32_t id) {
   std::lock_guard<std::mutex> guard(adapter->agent_lock);
@@ -3174,6 +3236,7 @@ bare_bluetooth_linux__agent_call(
   const char *method,
   const char *path,
   std::optional<std::string> capability,
+  DBusPendingCallNotifyFunction notify,
   js_function_t<void, js_object_t> callback
 ) {
   auto *call = new bare_bluetooth_linux_async_call_t();
@@ -3197,43 +3260,36 @@ bare_bluetooth_linux__agent_call(
   dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
   dbus_message_unref(msg);
 
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  dbus_pending_call_set_notify(pending, notify, call, NULL);
 }
 
 static void
 bare_bluetooth_linux_agent_register(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, std::string capability, js_function_t<void, js_object_t> callback
 ) {
+  bare_bluetooth_linux__agent_cleanup(&*adapter);
+
   adapter->agent_path = path;
 
   dbus_connection_register_object_path(
     adapter->signal_conn, adapter->agent_path.c_str(), &bare_bluetooth_linux__agent_vtable, &*adapter
   );
 
-  bare_bluetooth_linux__agent_call(env, &*adapter, "RegisterAgent", adapter->agent_path.c_str(), capability, callback);
+  bare_bluetooth_linux__agent_call(env, &*adapter, "RegisterAgent", adapter->agent_path.c_str(), capability, bare_bluetooth_linux__on_agent_register_notify, callback);
 }
 
 static void
 bare_bluetooth_linux_agent_request_default(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__agent_call(env, &*adapter, "RequestDefaultAgent", adapter->agent_path.c_str(), std::nullopt, callback);
+  bare_bluetooth_linux__agent_call(env, &*adapter, "RequestDefaultAgent", adapter->agent_path.c_str(), std::nullopt, bare_bluetooth_linux__on_pending_call_notify, callback);
 }
 
 static void
 bare_bluetooth_linux_agent_unregister(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, js_function_t<void, js_object_t> callback
 ) {
-  bare_bluetooth_linux__agent_call(env, &*adapter, "UnregisterAgent", adapter->agent_path.c_str(), std::nullopt, callback);
-
-  dbus_connection_unregister_object_path(adapter->signal_conn, adapter->agent_path.c_str());
-  adapter->agent_path.clear();
-
-  std::lock_guard<std::mutex> guard(adapter->agent_lock);
-  for (auto &[id, msg] : adapter->agent_requests) {
-    dbus_message_unref(msg);
-  }
-  adapter->agent_requests.clear();
+  bare_bluetooth_linux__agent_call(env, &*adapter, "UnregisterAgent", adapter->agent_path.c_str(), std::nullopt, bare_bluetooth_linux__on_agent_unregister_notify, callback);
 }
 
 // The L2CAP transport lives in libl2cap (I/O agnostic, kernel sockets). This
