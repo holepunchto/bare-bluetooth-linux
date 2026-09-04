@@ -12,5 +12,6 @@ if (!isCI && !poweredAdapter()) {
   require('./test/characteristic')
   require('./test/l2cap')
   require('./test/gatt-server')
+  require('./test/agent')
   require('./test/l2cap-vhci')
 }
