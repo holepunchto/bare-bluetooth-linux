@@ -465,7 +465,11 @@ struct bare_bluetooth_linux_gatt_app_t {
 
 struct bare_bluetooth_linux_gatt_options_t {
   uint32_t offset = 0;
+  std::string type;
+  uint32_t mtu = 0;
   std::string device;
+  std::string link;
+  bool prepare_authorize = false;
 };
 
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
@@ -486,13 +490,13 @@ struct bare_bluetooth_linux_gatt_characteristic_notifying_event_t {
 };
 
 using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
-  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t, uint32_t, std::string>;
+  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t, uint32_t, std::string, uint32_t, std::string, std::string, bool>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_notifying_fn =
   js_function_t<void, js_receiver_t, std::string, bool>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_read_fn =
-  js_function_t<void, js_receiver_t, std::string, uint32_t, uint32_t, std::string>;
+  js_function_t<void, js_receiver_t, std::string, uint32_t, uint32_t, uint32_t, std::string, std::string>;
 
 struct bare_bluetooth_linux_adapter_t {
   DBusConnection *conn;
@@ -858,7 +862,7 @@ bare_bluetooth_linux__on_gatt_characteristic_read(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id, static_cast<uint32_t>(event->options.offset), event->options.device);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id, event->options.offset, event->options.mtu, event->options.device, event->options.link);
 
   delete event;
 
@@ -912,7 +916,7 @@ bare_bluetooth_linux__on_gatt_characteristic_write(
   err = js_create_arraybuffer(env, event->value, buffer);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer, static_cast<uint32_t>(event->options.offset), event->options.device);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer, event->options.offset, event->options.type, event->options.mtu, event->options.device, event->options.link, event->options.prepare_authorize);
 
   delete event;
 
@@ -1572,12 +1576,32 @@ bare_bluetooth_linux__gatt_options(DBusMessageIter *iter) {
     dbus_message_iter_next(&entry);
     dbus_message_iter_recurse(&entry, &variant);
 
-    if (strcmp(key, "offset") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_UINT16) {
-      dbus_message_iter_get_basic(&variant, &options.offset);
-    } else if (strcmp(key, "device") == 0 && dbus_message_iter_get_arg_type(&variant) == DBUS_TYPE_OBJECT_PATH) {
+    int arg = dbus_message_iter_get_arg_type(&variant);
+
+    if (strcmp(key, "offset") == 0 && arg == DBUS_TYPE_UINT16) {
+      dbus_uint16_t offset;
+      dbus_message_iter_get_basic(&variant, &offset);
+      options.offset = offset;
+    } else if (strcmp(key, "type") == 0 && arg == DBUS_TYPE_STRING) {
+      const char *type;
+      dbus_message_iter_get_basic(&variant, &type);
+      options.type = type;
+    } else if (strcmp(key, "mtu") == 0 && arg == DBUS_TYPE_UINT16) {
+      dbus_uint16_t mtu;
+      dbus_message_iter_get_basic(&variant, &mtu);
+      options.mtu = mtu;
+    } else if (strcmp(key, "device") == 0 && arg == DBUS_TYPE_OBJECT_PATH) {
       const char *device;
       dbus_message_iter_get_basic(&variant, &device);
       options.device = device;
+    } else if (strcmp(key, "link") == 0 && arg == DBUS_TYPE_STRING) {
+      const char *link;
+      dbus_message_iter_get_basic(&variant, &link);
+      options.link = link;
+    } else if (strcmp(key, "prepare-authorize") == 0 && arg == DBUS_TYPE_BOOLEAN) {
+      dbus_bool_t prepare_authorize;
+      dbus_message_iter_get_basic(&variant, &prepare_authorize);
+      options.prepare_authorize = prepare_authorize == TRUE;
     }
 
     dbus_message_iter_next(&dict);
