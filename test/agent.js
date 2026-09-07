@@ -2,13 +2,13 @@ const test = require('brittle')
 const { Adapter, Agent } = require('..')
 const { isCI } = require('./helpers')
 
-class JustWorks extends Agent {
+class TestAgent extends Agent {
   requestConfirmation(device, passkey) {}
 
   requestAuthorization(device) {}
 }
 
-const agent = new JustWorks()
+const agent = new TestAgent()
 
 test('registerAgent and unregisterAgent', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
@@ -103,12 +103,12 @@ test('Agent refuses everything it was not taught', (t) => {
   t.exception(() => bare.requestConfirmation('/org/bluez/hci0/dev_00', 0), /not implemented/)
   t.exception(() => bare.requestAuthorization('/org/bluez/hci0/dev_00'), /not implemented/)
   t.exception(() => bare.authorizeService('/org/bluez/hci0/dev_00', '180a'), /not implemented/)
+  t.exception(() => bare.displayPinCode('/org/bluez/hci0/dev_00', '000000'), /not implemented/)
 })
 
 test('Agent ignores what needs no answer', (t) => {
   const bare = new Agent()
 
-  t.execution(() => bare.displayPinCode('/org/bluez/hci0/dev_00', '0000'))
   t.execution(() => bare.displayPasskey('/org/bluez/hci0/dev_00', 0, 0))
   t.execution(() => bare.release())
   t.execution(() => bare.cancel())

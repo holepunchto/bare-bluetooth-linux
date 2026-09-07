@@ -1892,7 +1892,7 @@ bare_bluetooth_linux__agent_message_handler(
     deferred = false;
   } else if (strcmp(member, "DisplayPinCode") == 0) {
     ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
-    deferred = false;
+    deferred = true;
   } else if (strcmp(member, "DisplayPasskey") == 0) {
     ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_UINT16, &entered, DBUS_TYPE_INVALID);
     deferred = false;
