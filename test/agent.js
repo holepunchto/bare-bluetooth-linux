@@ -90,6 +90,72 @@ test('destroy releases a registered agent', { skip: isCI }, async (t) => {
   t.execution(() => adapter.destroy())
 })
 
+test('registerAgent accepts every capability BlueZ defines', { skip: isCI }, async (t) => {
+  const capabilities = [
+    '',
+    'DisplayOnly',
+    'DisplayYesNo',
+    'KeyboardOnly',
+    'NoInputNoOutput',
+    'KeyboardDisplay'
+  ]
+
+  for (const capability of capabilities) {
+    using adapter = new Adapter()
+
+    await adapter.registerAgent(agent, capability)
+    t.pass('accepted ' + (capability || 'the default'))
+
+    await adapter.unregisterAgent()
+  }
+})
+
+test('registerAgent defaults its capability', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  await adapter.registerAgent(agent)
+  t.pass('registered without a capability')
+
+  await adapter.unregisterAgent()
+})
+
+test('unregisterAgent rejects the second time', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  await adapter.registerAgent(agent, 'NoInputNoOutput')
+  await adapter.unregisterAgent()
+
+  await t.exception(() => adapter.unregisterAgent(), /No agent is registered/)
+})
+
+test('the agent methods reject once the adapter is destroyed', { skip: isCI }, async (t) => {
+  const adapter = new Adapter()
+  adapter.destroy()
+
+  await t.exception(() => adapter.registerAgent(agent), /destroyed/)
+  await t.exception(() => adapter.requestDefaultAgent(), /destroyed/)
+  await t.exception(() => adapter.unregisterAgent(), /destroyed/)
+})
+
+test('a subclass replaces the refusing defaults', async (t) => {
+  class Answering extends Agent {
+    requestPinCode(device) {
+      return '123456'
+    }
+
+    async requestPasskey(device) {
+      return 42
+    }
+  }
+
+  const answering = new Answering()
+
+  t.is(answering.requestPinCode('/org/bluez/hci0/dev_00'), '123456')
+  t.is(await answering.requestPasskey('/org/bluez/hci0/dev_00'), 42)
+
+  t.exception(() => answering.requestConfirmation('/org/bluez/hci0/dev_00', 0), /not implemented/)
+})
+
 test('Agent is exported', (t) => {
   t.is(typeof Agent, 'function')
   t.is(Agent.name, 'Agent')
