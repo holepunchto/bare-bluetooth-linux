@@ -3141,7 +3141,14 @@ bare_bluetooth_linux__on_agent_register_notify(DBusPendingCall *pending, void *d
   dbus_pending_call_unref(pending);
 
   auto *adapter = call->adapter;
-  if (call->error) bare_bluetooth_linux__agent_cleanup(adapter);
+
+  if (call->error) {
+    adapter->agent_path.clear();
+  } else {
+    dbus_connection_register_object_path(
+      adapter->signal_conn, adapter->agent_path.c_str(), &bare_bluetooth_linux__agent_vtable, adapter
+    );
+  }
 
   js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
 }
@@ -3270,10 +3277,6 @@ bare_bluetooth_linux_agent_register(
   bare_bluetooth_linux__agent_cleanup(&*adapter);
 
   adapter->agent_path = path;
-
-  dbus_connection_register_object_path(
-    adapter->signal_conn, adapter->agent_path.c_str(), &bare_bluetooth_linux__agent_vtable, &*adapter
-  );
 
   bare_bluetooth_linux__agent_call(env, &*adapter, "RegisterAgent", adapter->agent_path.c_str(), capability, bare_bluetooth_linux__on_agent_register_notify, callback);
 }
