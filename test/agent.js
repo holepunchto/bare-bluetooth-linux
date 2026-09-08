@@ -156,6 +156,23 @@ test('a subclass replaces the refusing defaults', async (t) => {
   t.exception(() => answering.requestConfirmation('/org/bluez/hci0/dev_00', 0), /not implemented/)
 })
 
+test('a refusing subclass can return false or throw', (t) => {
+  class Refusing extends Agent {
+    requestConfirmation(device, passkey) {
+      return false
+    }
+
+    requestAuthorization(device) {
+      throw new Error('nope')
+    }
+  }
+
+  const refusing = new Refusing()
+
+  t.is(refusing.requestConfirmation('/org/bluez/hci0/dev_00', 0), false)
+  t.exception(() => refusing.requestAuthorization('/org/bluez/hci0/dev_00'), /nope/)
+})
+
 test('Agent is exported', (t) => {
   t.is(typeof Agent, 'function')
   t.is(Agent.name, 'Agent')
