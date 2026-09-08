@@ -2703,6 +2703,38 @@ bare_bluetooth_linux_device_pair(
   bare_bluetooth_linux__call_method_async(env, adapter, path, BLUEZ_DEVICE_IFACE, "Pair", DBUS_CONNECT_TIMEOUT, callback);
 }
 
+static void
+bare_bluetooth_linux_device_remove(
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::string path,
+  js_function_t<void, js_object_t> callback
+) {
+  auto *call = new bare_bluetooth_linux_async_call_t();
+  call->env = env;
+  call->adapter = &*adapter;
+
+  int err;
+  err = js_create_reference(env, callback, call->cb);
+  assert(err == 0);
+
+  DBusMessage *msg = dbus_message_new_method_call(
+    BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "RemoveDevice"
+  );
+
+  const char *device_path = path.c_str();
+  DBusMessageIter iter;
+  dbus_message_iter_init_append(msg, &iter);
+  dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &device_path);
+
+  DBusPendingCall *pending;
+  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
+  dbus_message_unref(msg);
+
+  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+}
+
 static bool
 bare_bluetooth_linux_service_is_primary(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
@@ -4096,6 +4128,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceOpenL2CAPChannel", bare_bluetooth_linux_device_open_l2cap_channel)
   V("deviceDisconnect", bare_bluetooth_linux_device_disconnect)
   V("devicePair", bare_bluetooth_linux_device_pair)
+  V("deviceRemove", bare_bluetooth_linux_device_remove)
 
   V("serviceIsPrimary", bare_bluetooth_linux_service_is_primary)
 

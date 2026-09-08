@@ -189,3 +189,42 @@ hook('teardown', { skip: isCI }, async (t) => {
   if (eventDevice && eventDevice.connected) await eventDevice.disconnect()
   if (eventAdapter) eventAdapter.destroy()
 })
+
+test('removeDevice forgets a discovered device', { skip: isCI, timeout: 30000 }, async (t) => {
+  using adapter = new Adapter()
+
+  adapter.startDiscovery()
+
+  await new Promise((resolve) => {
+    adapter.on('device', resolve)
+  })
+
+  adapter.stopDiscovery()
+
+  // Never touch a bonded or live device: removing one would unpair real
+  // hardware such as the keyboard this machine runs on
+  const device = [...adapter.devices.values()].find((d) => !d.paired && !d.connected)
+
+  if (!device) {
+    t.pass('no disposable device in range')
+    return
+  }
+
+  const path = device.path
+  t.ok(adapter.devices.has(path), 'known before')
+
+  await adapter.removeDevice(device)
+
+  for (let i = 0; i < 20 && adapter.devices.has(path); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  t.absent(adapter.devices.has(path), 'forgotten: ' + path)
+})
+
+test('removeDevice rejects once the adapter is destroyed', { skip: isCI }, async (t) => {
+  const adapter = new Adapter()
+  adapter.destroy()
+
+  await t.exception(() => adapter.removeDevice({ path: '/org/bluez/hci0/dev_00' }), /destroyed/)
+})
