@@ -1876,8 +1876,12 @@ bare_bluetooth_linux__agent_drain(bare_bluetooth_linux_adapter_t *adapter, const
 
   for (auto &[id, msg] : adapter->agent_requests) {
     DBusMessage *reply = dbus_message_new_error(msg, "org.bluez.Error.Canceled", reason);
-    dbus_connection_send(adapter->signal_conn, reply, nullptr);
-    dbus_message_unref(reply);
+
+    if (reply != nullptr) {
+      dbus_connection_send(adapter->signal_conn, reply, nullptr);
+      dbus_message_unref(reply);
+    }
+
     dbus_message_unref(msg);
   }
   adapter->agent_requests.clear();
@@ -1927,8 +1931,12 @@ bare_bluetooth_linux__agent_message_handler(
 
   if (!ok) {
     DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Unexpected arguments");
-    dbus_connection_send(conn, error, nullptr);
-    dbus_message_unref(error);
+
+    if (error != nullptr) {
+      dbus_connection_send(conn, error, nullptr);
+      dbus_message_unref(error);
+    }
+
     return DBUS_HANDLER_RESULT_HANDLED;
   }
 
@@ -3141,8 +3149,11 @@ bare_bluetooth_linux__agent_take(bare_bluetooth_linux_adapter_t *adapter, uint32
 
 static void
 bare_bluetooth_linux__agent_send(bare_bluetooth_linux_adapter_t *adapter, DBusMessage *msg, DBusMessage *reply) {
-  dbus_connection_send(adapter->signal_conn, reply, nullptr);
-  dbus_message_unref(reply);
+  if (reply != nullptr) {
+    dbus_connection_send(adapter->signal_conn, reply, nullptr);
+    dbus_message_unref(reply);
+  }
+
   dbus_message_unref(msg);
 }
 
