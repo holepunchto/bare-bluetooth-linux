@@ -143,8 +143,8 @@ test('a subclass replaces the refusing defaults', async (t) => {
       return '123456'
     }
 
-    async requestPasskey(device) {
-      return 42
+    requestPasskey(device) {
+      return Promise.resolve(42)
     }
   }
 
