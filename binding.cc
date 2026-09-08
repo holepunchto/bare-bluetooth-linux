@@ -486,8 +486,9 @@ struct bare_bluetooth_linux_agent_request_event_t {
   std::string method;
   uint32_t id;
   std::string device;
-  std::string text;
-  uint32_t number;
+  std::string pincode;
+  std::string uuid;
+  uint32_t passkey;
   uint32_t entered;
 };
 
@@ -509,7 +510,7 @@ using bare_bluetooth_linux__on_gatt_characteristic_notifying_fn =
   js_function_t<void, js_receiver_t, std::string, bool>;
 
 using bare_bluetooth_linux__on_agent_request_fn =
-  js_function_t<void, js_receiver_t, std::string, uint32_t, std::string, std::string, uint32_t, uint32_t>;
+  js_function_t<void, js_receiver_t, std::string, uint32_t, std::string, std::string, std::string, uint32_t, uint32_t>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_read_fn =
   js_function_t<void, js_receiver_t, std::string, uint32_t, uint32_t, uint32_t, std::string, std::string>;
@@ -882,7 +883,7 @@ bare_bluetooth_linux__on_agent_request(
   err = js_get_reference_value(env, ctx->adapter->ctx, &receiver);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->method, event->id, event->device, event->text, event->number, event->entered);
+  js_call_function(env, function, js_receiver_t(receiver), event->method, event->id, event->device, event->pincode, event->uuid, event->passkey, event->entered);
 
   delete event;
 
@@ -1893,8 +1894,9 @@ bare_bluetooth_linux__agent_message_handler(
   const char *member = dbus_message_get_member(msg);
 
   const char *device = nullptr;
-  const char *text = nullptr;
-  dbus_uint32_t number = 0;
+  const char *pincode = nullptr;
+  const char *uuid = nullptr;
+  dbus_uint32_t passkey = 0;
   dbus_uint16_t entered = 0;
   bool deferred;
 
@@ -1905,19 +1907,19 @@ bare_bluetooth_linux__agent_message_handler(
     ok = TRUE;
     deferred = false;
   } else if (strcmp(member, "DisplayPinCode") == 0) {
-    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &pincode, DBUS_TYPE_INVALID);
     deferred = true;
   } else if (strcmp(member, "DisplayPasskey") == 0) {
-    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_UINT16, &entered, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &passkey, DBUS_TYPE_UINT16, &entered, DBUS_TYPE_INVALID);
     deferred = false;
   } else if (strcmp(member, "RequestPinCode") == 0 || strcmp(member, "RequestPasskey") == 0 || strcmp(member, "RequestAuthorization") == 0) {
     ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_INVALID);
     deferred = true;
   } else if (strcmp(member, "RequestConfirmation") == 0) {
-    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &number, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_UINT32, &passkey, DBUS_TYPE_INVALID);
     deferred = true;
   } else if (strcmp(member, "AuthorizeService") == 0) {
-    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID);
+    ok = dbus_message_get_args(msg, nullptr, DBUS_TYPE_OBJECT_PATH, &device, DBUS_TYPE_STRING, &uuid, DBUS_TYPE_INVALID);
     deferred = true;
   } else {
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
@@ -1934,8 +1936,9 @@ bare_bluetooth_linux__agent_message_handler(
   event->method = member;
   event->id = deferred ? dbus_message_get_serial(msg) : 0;
   if (device) event->device = device;
-  if (text) event->text = text;
-  event->number = number;
+  if (pincode) event->pincode = pincode;
+  if (uuid) event->uuid = uuid;
+  event->passkey = passkey;
   event->entered = entered;
 
   if (deferred) {
