@@ -3238,9 +3238,14 @@ static void
 bare_bluetooth_linux_agent_register(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string capability, js_function_t<void, js_object_t> callback
 ) {
-  dbus_connection_register_object_path(
-    adapter->signal_conn, BLUEZ_AGENT_PATH, &bare_bluetooth_linux__agent_vtable, &*adapter
-  );
+  void *registered = nullptr;
+  dbus_connection_get_object_path_data(adapter->signal_conn, BLUEZ_AGENT_PATH, &registered);
+
+  if (registered == nullptr) {
+    dbus_connection_register_object_path(
+      adapter->signal_conn, BLUEZ_AGENT_PATH, &bare_bluetooth_linux__agent_vtable, &*adapter
+    );
+  }
 
   bare_bluetooth_linux__agent_call(env, &*adapter, "RegisterAgent", capability, callback);
 }
