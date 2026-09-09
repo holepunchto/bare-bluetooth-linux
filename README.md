@@ -27,7 +27,7 @@ If a run is interrupted, `btvirt` can survive and leave its controllers behind. 
 For the GATT server, the pairing agent and the request options are checked by hand, against a phone:
 
 ```
-npx bare test/manual-gatt.js
+bare test/manual-gatt.js
 ```
 
 The script walks you through it. It first lists the bonds this machine still holds and offers to forget one, then publishes a Heart Rate service and prints the five steps to follow on the phone. Each step ticks off what it observes - the agent answering a pairing, the subscription, the read, the write, the device path carried in the request options - and it prints its own summary once all six are seen:
