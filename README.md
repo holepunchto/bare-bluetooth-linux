@@ -24,9 +24,7 @@ If a run is interrupted, `btvirt` can survive and leave its controllers behind. 
 
 ### The GATT server needs a real central
 
-The virtual controllers cannot test the GATT server. An unbonded link between two of them drops within a second, and neither `device.pair()` nor `bluetoothctl pair` can bond them - both fail with `Authentication Failed`. Without a link that survives, nothing downstream can be observed. This was measured, twice; please do not spend another day on it.
-
-So the GATT server, the pairing agent and the request options are checked by hand, against a phone:
+For the GATT server, the pairing agent and the request options are checked by hand, against a phone:
 
 ```
 npx bare test/manual-gatt.js
@@ -43,4 +41,4 @@ all 6 checks observed, the gatt server works end to end
 
 You need a BLE explorer on the phone: nRF Connect or LightBlue, both free.
 
-Clear the bond on **both** sides before a run. A bond forgotten on one side only leaves the other holding keys the peer no longer has, and every later pairing fails with no useful error. The script covers the Linux side; forget the machine in the phone's bluetooth settings yourself. Phones also cache the GATT service list per peripheral and never re-read it, so a stale bond will have you staring at a service tree from a previous session, wondering why your changes do nothing.
+Clear the bond on **both** sides before a run. A bond forgotten on one side only leaves the other holding keys the peer no longer has, and every later pairing fails with no useful error. Use the script to remove the bond on Linux side. Do it manually on the phone side. Phones also cache the GATT service list per peripheral and never re-read it, so a stale bond will have you staring at a service tree from a previous session, wondering why your changes do nothing.
