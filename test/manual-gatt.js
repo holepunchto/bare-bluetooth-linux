@@ -3,7 +3,7 @@
 // virtual controller on this machine can do. Run it, follow the steps, watch
 // the checklist fill in.
 //
-//   npx bare test/manual-gatt.js
+//   bare test/manual-gatt.js
 
 const stdio = require('bare-stdio')
 const {
