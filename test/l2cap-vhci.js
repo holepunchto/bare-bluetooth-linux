@@ -27,7 +27,7 @@ async function openPair(t, { accept = true, serverSecurity, clientSecurity } = {
   await server.registerAdvertisement(ad)
 
   client.setDiscoveryFilter({ transport: 'le' })
-  client.startDiscovery()
+  await client.startDiscovery()
   let device = [...client.devices.values()].find((d) => d.address === server.address)
   if (!device) {
     device = await new Promise((resolve) => {
@@ -39,7 +39,7 @@ async function openPair(t, { accept = true, serverSecurity, clientSecurity } = {
       client.on('device', ondevice)
     })
   }
-  client.stopDiscovery()
+  await client.stopDiscovery()
 
   if (!accept) return { server, client, device, psm }
 
