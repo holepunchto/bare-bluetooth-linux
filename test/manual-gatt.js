@@ -160,8 +160,27 @@ async function main() {
   const app = new GattApplication({ path: '/com/bare/manual' })
   const service = new GattService({ uuid: SERVICE })
 
+  // A second characteristic and a second service on purpose: the checks all hit
+  // the first characteristic, whose registration used to dangle once more were added
   service.addCharacteristic(characteristic)
+  service.addCharacteristic(
+    new GattCharacteristic({
+      uuid: '00002a39-0000-1000-8000-00805f9b34fb',
+      flags: ['write']
+    })
+  )
+
+  const battery = new GattService({ uuid: '0000180f-0000-1000-8000-00805f9b34fb' })
+  battery.addCharacteristic(
+    new GattCharacteristic({
+      uuid: '00002a19-0000-1000-8000-00805f9b34fb',
+      flags: ['read'],
+      value: new Uint8Array([100])
+    })
+  )
+
   app.addService(service)
+  app.addService(battery)
 
   await adapter.registerAgent(new JustWorks(), 'NoInputNoOutput')
   await adapter.requestDefaultAgent()
