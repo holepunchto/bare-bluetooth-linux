@@ -39,6 +39,7 @@ static std::optional<std::string>
 dbus_get_string_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return std::nullopt;
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
@@ -69,6 +70,7 @@ static bool
 dbus_get_bool_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return false;
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
@@ -111,6 +113,7 @@ static std::optional<T>
 dbus_get_numeric_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return std::nullopt;
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
@@ -141,6 +144,7 @@ static std::vector<std::string>
 dbus_get_string_array_prop(DBusConnection *conn, const char *path, const char *iface, const char *prop) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return {};
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
 
   DBusError err;
@@ -200,6 +204,11 @@ static void
 dbus_set_bool_prop(js_env_t *env, DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Set");
+  if (msg == nullptr) {
+    int res = js_throw_error(env, nullptr, "Failed to create D-Bus message");
+    assert(res == 0);
+    return;
+  }
 
   DBusMessageIter iter, variant;
   dbus_message_iter_init_append(msg, &iter);
@@ -269,21 +278,26 @@ static DBusPendingCall *
 dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, iface, method);
+  if (msg == nullptr) return nullptr;
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(conn, msg, &pending, timeout);
+  DBusPendingCall *pending = nullptr;
+  dbus_bool_t sent = dbus_connection_send_with_reply(conn, msg, &pending, timeout);
   dbus_message_unref(msg);
 
+  if (!sent) return nullptr;
   return pending;
 }
 
 static std::optional<std::string>
 dbus_call_void_method_sync(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
   DBusPendingCall *pending = dbus_call_void_method(conn, path, iface, method, timeout);
+  if (pending == nullptr) return "Failed to reach bluetoothd";
 
   dbus_pending_call_block(pending);
   DBusMessage *reply = dbus_pending_call_steal_reply(pending);
   dbus_pending_call_unref(pending);
+
+  if (reply == nullptr) return "No reply from bluetoothd";
 
   if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
     DBusError err;
@@ -1084,6 +1098,26 @@ bare_bluetooth_linux__on_pending_read_call_notify(DBusPendingCall *pending, void
   js_call_threadsafe_function(call->adapter->tsfn_read_reply, call, js_threadsafe_function_nonblocking);
 }
 
+template <typename Call, typename Tsfn>
+static void
+bare_bluetooth_linux__fail_call(Call *call, Tsfn tsfn) {
+  call->error = "Failed to reach bluetoothd";
+  js_call_threadsafe_function(tsfn, call, js_threadsafe_function_nonblocking);
+}
+
+// On failure the JS callback still fires, with an error
+template <typename Call, typename Tsfn>
+static void
+bare_bluetooth_linux__send_call(DBusConnection *conn, DBusMessage *msg, int timeout, Call *call, DBusPendingCallNotifyFunction notify, Tsfn tsfn) {
+  DBusPendingCall *pending = nullptr;
+  dbus_bool_t sent = dbus_connection_send_with_reply(conn, msg, &pending, timeout);
+  dbus_message_unref(msg);
+
+  if (!sent || pending == nullptr) return bare_bluetooth_linux__fail_call(call, tsfn);
+
+  dbus_pending_call_set_notify(pending, notify, call, NULL);
+}
+
 static void
 bare_bluetooth_linux__on_read_reply(
   js_env_t *env,
@@ -1525,6 +1559,8 @@ bare_bluetooth_linux__advertisement_message_handler(
 
   if (dbus_message_is_method_call(msg, DBUS_PROP_IFACE, "GetAll")) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
     DBusMessageIter iter, dict;
     dbus_message_iter_init_append(reply, &iter);
     dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
@@ -1551,6 +1587,8 @@ bare_bluetooth_linux__advertisement_message_handler(
 
   if (dbus_message_is_method_call(msg, BLUEZ_LE_ADV_IFACE, "Release")) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
     dbus_connection_send(conn, reply, nullptr);
     dbus_message_unref(reply);
 
@@ -1659,6 +1697,7 @@ bare_bluetooth_linux__gatt_options(DBusMessageIter *iter) {
 static void
 bare_bluetooth_linux__gatt_emit_value_changed(DBusConnection *conn, const char *path, const std::vector<uint8_t> &value) {
   DBusMessage *msg = dbus_message_new_signal(path, DBUS_PROP_IFACE, "PropertiesChanged");
+  if (msg == nullptr) return;
 
   DBusMessageIter iter, dict, invalidated;
   dbus_message_iter_init_append(msg, &iter);
@@ -1703,6 +1742,8 @@ bare_bluetooth_linux__gatt_message_handler(
 
   if (dbus_message_is_method_call(msg, DBUS_OM_IFACE, "GetManagedObjects")) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
     DBusMessageIter iter, outer;
     dbus_message_iter_init_append(reply, &iter);
     dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{oa{sa{sv}}}", &outer);
@@ -1757,6 +1798,8 @@ bare_bluetooth_linux__gatt_message_handler(
     auto svc_it = adapter->gatt_app.service_map.find(path);
     if (svc_it != adapter->gatt_app.service_map.end()) {
       DBusMessage *reply = dbus_message_new_method_return(msg);
+      if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
       DBusMessageIter iter, dict;
       dbus_message_iter_init_append(reply, &iter);
       dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
@@ -1770,6 +1813,8 @@ bare_bluetooth_linux__gatt_message_handler(
     auto ch_it = adapter->gatt_app.characteristic_map.find(path);
     if (ch_it != adapter->gatt_app.characteristic_map.end()) {
       DBusMessage *reply = dbus_message_new_method_return(msg);
+      if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
       DBusMessageIter iter, dict;
       dbus_message_iter_init_append(reply, &iter);
       dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
@@ -1815,6 +1860,8 @@ bare_bluetooth_linux__gatt_message_handler(
       DBusMessageIter args;
       if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
         DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
+        if (error == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
         dbus_connection_send(conn, error, nullptr);
         dbus_message_unref(error);
         return DBUS_HANDLER_RESULT_HANDLED;
@@ -1826,6 +1873,11 @@ bare_bluetooth_linux__gatt_message_handler(
       const uint8_t *bytes;
       int len;
       dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
+
+      // Reply allocated before any side effect so a NEED_MEMORY retry is idempotent
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
       ch.value.assign(bytes, bytes + len);
 
       dbus_message_iter_next(&args);
@@ -1836,7 +1888,6 @@ bare_bluetooth_linux__gatt_message_handler(
       event->options = bare_bluetooth_linux__gatt_options(&args);
       js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
 
-      DBusMessage *reply = dbus_message_new_method_return(msg);
       dbus_connection_send(conn, reply, nullptr);
       dbus_message_unref(reply);
       return DBUS_HANDLER_RESULT_HANDLED;
@@ -1850,6 +1901,9 @@ bare_bluetooth_linux__gatt_message_handler(
     if (it != adapter->gatt_app.characteristic_map.end()) {
       auto &ch = *it->second;
 
+      DBusMessage *reply = dbus_message_new_method_return(msg);
+      if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
       if (ch.notifying != start) {
         ch.notifying = start;
 
@@ -1859,7 +1913,6 @@ bare_bluetooth_linux__gatt_message_handler(
         js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_notifying, event, js_threadsafe_function_nonblocking);
       }
 
-      DBusMessage *reply = dbus_message_new_method_return(msg);
       dbus_connection_send(conn, reply, nullptr);
       dbus_message_unref(reply);
       return DBUS_HANDLER_RESULT_HANDLED;
@@ -1954,6 +2007,11 @@ bare_bluetooth_linux__agent_message_handler(
     adapter->agent_requests[event->id] = dbus_message_ref(msg);
   } else {
     DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (reply == nullptr) {
+      delete event;
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    }
+
     dbus_connection_send(conn, reply, nullptr);
     dbus_message_unref(reply);
   }
@@ -2405,6 +2463,11 @@ bare_bluetooth_linux_adapter_set_discovery_filter(
 ) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "SetDiscoveryFilter");
+  if (msg == nullptr) {
+    int err = js_throw_error(env, nullptr, "Failed to create D-Bus message");
+    assert(err == 0);
+    return;
+  }
 
   DBusMessageIter iter, dict;
   dbus_message_iter_init_append(msg, &iter);
@@ -2517,6 +2580,8 @@ bare_bluetooth_linux_device_get_manufacturer_data(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return;
+
   const char *iface = BLUEZ_DEVICE_IFACE;
   const char *prop = "ManufacturerData";
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
@@ -2587,6 +2652,8 @@ bare_bluetooth_linux_device_get_service_data(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), DBUS_PROP_IFACE, "Get");
+  if (msg == nullptr) return;
+
   const char *iface = BLUEZ_DEVICE_IFACE;
   const char *prop = "ServiceData";
   dbus_message_append_args(msg, DBUS_TYPE_STRING, &iface, DBUS_TYPE_STRING, &prop, DBUS_TYPE_INVALID);
@@ -2666,6 +2733,7 @@ bare_bluetooth_linux__call_method_async(
   assert(err == 0);
 
   DBusPendingCall *pending = dbus_call_void_method(adapter->signal_conn, path.c_str(), iface, method.c_str(), timeout);
+  if (pending == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
 }
@@ -2722,17 +2790,14 @@ bare_bluetooth_linux_device_remove(
   DBusMessage *msg = dbus_message_new_method_call(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "RemoveDevice"
   );
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *device_path = path.c_str();
   DBusMessageIter iter;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &device_path);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static bool
@@ -2756,17 +2821,14 @@ bare_bluetooth_linux_char_read(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "ReadValue");
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_read_reply);
 
   DBusMessageIter iter, dict;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_read_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_read_call_notify, adapter->tsfn_read_reply);
 }
 
 static void
@@ -2788,6 +2850,7 @@ bare_bluetooth_linux_char_write(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_CHAR_IFACE, "WriteValue");
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   DBusMessageIter iter, array, dict;
   dbus_message_iter_init_append(msg, &iter);
@@ -2804,11 +2867,7 @@ bare_bluetooth_linux_char_write(
 
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static void
@@ -2853,17 +2912,14 @@ bare_bluetooth_linux_desc_read(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_DESC_IFACE, "ReadValue");
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_read_reply);
 
   DBusMessageIter iter, dict;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_read_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_read_call_notify, adapter->tsfn_read_reply);
 }
 
 static void
@@ -2885,6 +2941,7 @@ bare_bluetooth_linux_desc_write(
 
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path.c_str(), BLUEZ_GATT_DESC_IFACE, "WriteValue");
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   DBusMessageIter iter, array, dict;
   dbus_message_iter_init_append(msg, &iter);
@@ -2898,11 +2955,7 @@ bare_bluetooth_linux_desc_write(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static std::vector<std::string>
@@ -2953,6 +3006,7 @@ bare_bluetooth_linux_advertisement_register(
   DBusMessage *msg = dbus_message_new_method_call(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_LE_ADV_MGR_IFACE, "RegisterAdvertisement"
   );
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *adv_path = BLUEZ_ADV_PATH;
   DBusMessageIter iter, dict;
@@ -2961,11 +3015,7 @@ bare_bluetooth_linux_advertisement_register(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static void
@@ -2986,19 +3036,16 @@ bare_bluetooth_linux_advertisement_unregister(
   DBusMessage *msg = dbus_message_new_method_call(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_LE_ADV_MGR_IFACE, "UnregisterAdvertisement"
   );
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *adv_path = BLUEZ_ADV_PATH;
   DBusMessageIter iter;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &adv_path);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
   dbus_connection_unregister_object_path(adapter->signal_conn, BLUEZ_ADV_PATH);
 
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static int32_t
@@ -3070,6 +3117,7 @@ bare_bluetooth_linux_gatt_register(
   DBusMessage *msg = dbus_message_new_method_call(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_GATT_MGR_IFACE, "RegisterApplication"
   );
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *app_path = adapter->gatt_app.path.c_str();
   DBusMessageIter iter, dict;
@@ -3078,11 +3126,7 @@ bare_bluetooth_linux_gatt_register(
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static void
@@ -3100,17 +3144,14 @@ bare_bluetooth_linux_gatt_unregister(
   DBusMessage *msg = dbus_message_new_method_call(
     BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_GATT_MGR_IFACE, "UnregisterApplication"
   );
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *app_path = adapter->gatt_app.path.c_str();
   DBusMessageIter iter;
   dbus_message_iter_init_append(msg, &iter);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &app_path);
 
-  DBusPendingCall *pending;
-  dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_gatt_unregister_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_gatt_unregister_notify, adapter->tsfn_method_reply);
 }
 
 static void
@@ -3154,6 +3195,11 @@ bare_bluetooth_linux_gatt_characteristic_respond_read(
   assert(err == 0);
 
   DBusMessage *reply = dbus_message_new_method_return(msg);
+  if (reply == nullptr) {
+    dbus_message_unref(msg);
+    return;
+  }
+
   DBusMessageIter iter, array;
   dbus_message_iter_init_append(reply, &iter);
   dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "y", &array);
@@ -3207,8 +3253,10 @@ bare_bluetooth_linux_agent_respond_string(
   if (msg == nullptr) return;
 
   DBusMessage *reply = dbus_message_new_method_return(msg);
-  const char *str = value.c_str();
-  dbus_message_append_args(reply, DBUS_TYPE_STRING, &str, DBUS_TYPE_INVALID);
+  if (reply != nullptr) {
+    const char *str = value.c_str();
+    dbus_message_append_args(reply, DBUS_TYPE_STRING, &str, DBUS_TYPE_INVALID);
+  }
 
   bare_bluetooth_linux__agent_send(&*adapter, msg, reply);
 }
@@ -3221,8 +3269,10 @@ bare_bluetooth_linux_agent_respond_number(
   if (msg == nullptr) return;
 
   DBusMessage *reply = dbus_message_new_method_return(msg);
-  dbus_uint32_t number = value;
-  dbus_message_append_args(reply, DBUS_TYPE_UINT32, &number, DBUS_TYPE_INVALID);
+  if (reply != nullptr) {
+    dbus_uint32_t number = value;
+    dbus_message_append_args(reply, DBUS_TYPE_UINT32, &number, DBUS_TYPE_INVALID);
+  }
 
   bare_bluetooth_linux__agent_send(&*adapter, msg, reply);
 }
@@ -3254,6 +3304,7 @@ bare_bluetooth_linux__agent_call(
   assert(err == 0);
 
   DBusMessage *msg = dbus_message_new_method_call(BLUEZ_BUS, BLUEZ_ROOT_PATH, BLUEZ_AGENT_MGR_IFACE, method);
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   const char *agent_path = BLUEZ_AGENT_PATH;
 
@@ -3264,17 +3315,7 @@ bare_bluetooth_linux__agent_call(
     dbus_message_append_args(msg, DBUS_TYPE_OBJECT_PATH, &agent_path, DBUS_TYPE_INVALID);
   }
 
-  DBusPendingCall *pending = nullptr;
-  dbus_bool_t sent = dbus_connection_send_with_reply(adapter->signal_conn, msg, &pending, DBUS_TIMEOUT);
-  dbus_message_unref(msg);
-
-  if (!sent || pending == nullptr) {
-    call->error = "Failed to reach bluetoothd";
-    js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
-    return;
-  }
-
-  dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static void
