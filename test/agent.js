@@ -1,5 +1,5 @@
 const test = require('brittle')
-const { Adapter, Agent } = require('..')
+const { Adapter, Agent, BluetoothError } = require('..')
 const { isCI } = require('./helpers')
 
 class TestAgent extends Agent {
@@ -195,4 +195,21 @@ test('Agent ignores what needs no answer', (t) => {
   t.execution(() => bare.displayPasskey('/org/bluez/hci0/dev_00', 0, 0))
   t.execution(() => bare.release())
   t.execution(() => bare.cancel())
+})
+
+test('a canceling subclass propagates the code', async (t) => {
+  class Canceling extends Agent {
+    requestConfirmation(device, passkey) {
+      throw BluetoothError.AGENT_CANCELED('user walked away')
+    }
+  }
+
+  const canceling = new Canceling()
+
+  try {
+    await canceling.requestConfirmation('/org/bluez/hci0/dev_00', 0)
+    t.fail('should have thrown')
+  } catch (err) {
+    t.is(err.code, 'AGENT_CANCELED')
+  }
 })
