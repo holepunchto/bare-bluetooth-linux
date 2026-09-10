@@ -171,13 +171,15 @@ test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
 test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  adapter.startDiscovery()
-
-  const device = await new Promise((resolve) => {
+  const found = new Promise((resolve) => {
     adapter.on('device', resolve)
   })
 
-  adapter.stopDiscovery()
+  await adapter.startDiscovery()
+
+  const device = await found
+
+  await adapter.stopDiscovery()
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 

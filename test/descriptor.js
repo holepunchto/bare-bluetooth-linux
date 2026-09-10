@@ -18,13 +18,16 @@ function needsDescriptor(t) {
 
 hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   adapter = new Adapter()
-  adapter.startDiscovery()
 
-  device = await new Promise((resolve) => {
+  const found = new Promise((resolve) => {
     adapter.on('device', resolve)
   })
 
-  adapter.stopDiscovery()
+  await adapter.startDiscovery()
+
+  device = await found
+
+  await adapter.stopDiscovery()
 
   try {
     await device.connect()

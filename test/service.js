@@ -5,13 +5,15 @@ const { isCI } = require('./helpers')
 test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  adapter.startDiscovery()
-
-  const device = await new Promise((resolve) => {
+  const found = new Promise((resolve) => {
     adapter.on('device', resolve)
   })
 
-  adapter.stopDiscovery()
+  await adapter.startDiscovery()
+
+  const device = await found
+
+  await adapter.stopDiscovery()
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 

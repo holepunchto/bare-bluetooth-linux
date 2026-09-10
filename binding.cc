@@ -288,31 +288,6 @@ dbus_call_void_method(DBusConnection *conn, const char *path, const char *iface,
   return pending;
 }
 
-static std::optional<std::string>
-dbus_call_void_method_sync(DBusConnection *conn, const char *path, const char *iface, const char *method, int timeout = DBUS_TIMEOUT) {
-  DBusPendingCall *pending = dbus_call_void_method(conn, path, iface, method, timeout);
-  if (pending == nullptr) return "Failed to reach bluetoothd";
-
-  dbus_pending_call_block(pending);
-  DBusMessage *reply = dbus_pending_call_steal_reply(pending);
-  dbus_pending_call_unref(pending);
-
-  if (reply == nullptr) return "No reply from bluetoothd";
-
-  if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR) {
-    DBusError err;
-    dbus_error_init(&err);
-    dbus_set_error_from_message(&err, reply);
-    std::string error = err.message;
-    dbus_error_free(&err);
-    dbus_message_unref(reply);
-    return error;
-  }
-
-  dbus_message_unref(reply);
-  return std::nullopt;
-}
-
 struct bare_bluetooth_linux_adapter_t;
 
 struct bare_bluetooth_linux_device_added_event_t {
@@ -2508,28 +2483,6 @@ bare_bluetooth_linux_adapter_set_discovery_filter(
   }
 }
 
-static void
-bare_bluetooth_linux_adapter_start_discovery(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
-) {
-  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StartDiscovery");
-  if (error) {
-    int err = js_throw_error(env, nullptr, error->c_str());
-    assert(err == 0);
-  }
-}
-
-static void
-bare_bluetooth_linux_adapter_stop_discovery(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter
-) {
-  auto error = dbus_call_void_method_sync(adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "StopDiscovery");
-  if (error) {
-    int err = js_throw_error(env, nullptr, error->c_str());
-    assert(err == 0);
-  }
-}
-
 static std::optional<std::string>
 bare_bluetooth_linux_device_get_address(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
@@ -2750,6 +2703,20 @@ bare_bluetooth_linux__call_method_async(
   if (pending == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   dbus_pending_call_set_notify(pending, bare_bluetooth_linux__on_pending_call_notify, call, NULL);
+}
+
+static void
+bare_bluetooth_linux_adapter_start_discovery(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, js_function_t<void, js_object_t> callback
+) {
+  bare_bluetooth_linux__call_method_async(env, adapter, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "StartDiscovery", DBUS_TIMEOUT, callback);
+}
+
+static void
+bare_bluetooth_linux_adapter_stop_discovery(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, js_function_t<void, js_object_t> callback
+) {
+  bare_bluetooth_linux__call_method_async(env, adapter, adapter->adapter_path, BLUEZ_ADAPTER_IFACE, "StopDiscovery", DBUS_TIMEOUT, callback);
 }
 
 static void

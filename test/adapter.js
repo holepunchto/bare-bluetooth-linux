@@ -60,9 +60,10 @@ test('accessors after destroy do not reach a closed connection', async (t) => {
   t.execution(() => {
     adapter.powered = true
     adapter.setDiscoveryFilter({ rssi: -70 })
-    adapter.startDiscovery()
-    adapter.stopDiscovery()
   })
+
+  await t.exception(() => adapter.startDiscovery(), /destroyed/)
+  await t.exception(() => adapter.stopDiscovery(), /destroyed/)
 })
 
 test('destroy is idempotent', (t) => {
@@ -92,9 +93,9 @@ test('is an EventEmitter', (t) => {
   t.is(typeof adapter.emit, 'function')
 })
 
-test('startDiscovery', { skip: isCI }, (t) => {
+test('startDiscovery', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
-  t.execution(() => adapter.startDiscovery())
+  await t.execution(() => adapter.startDiscovery())
 })
 
 test('setDiscoveryFilter with uuids', { skip: isCI }, (t) => {
@@ -112,23 +113,25 @@ test('setDiscoveryFilter with transport', { skip: isCI }, (t) => {
   t.execution(() => adapter.setDiscoveryFilter({ transport: 'le' }))
 })
 
-test('stopDiscovery', { skip: isCI }, (t) => {
+test('stopDiscovery', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
-  adapter.startDiscovery()
+  await adapter.startDiscovery()
 
-  t.execution(() => adapter.stopDiscovery())
+  await t.execution(() => adapter.stopDiscovery())
 })
 
 test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) => {
   using adapter = new Adapter()
 
-  adapter.startDiscovery()
-
-  const device = await new Promise((resolve) => {
+  const found = new Promise((resolve) => {
     adapter.on('device', resolve)
   })
 
-  adapter.stopDiscovery()
+  await adapter.startDiscovery()
+
+  const device = await found
+
+  await adapter.stopDiscovery()
 
   t.ok(device)
   t.ok(adapter.devices.has(device.path))
@@ -157,11 +160,11 @@ test('discovery emits discovering', { skip: isCI, timeout: 10000 }, async (t) =>
 
   const started = new Promise((resolve) => adapter.once('discovering', resolve))
 
-  adapter.startDiscovery()
+  await adapter.startDiscovery()
   t.is(await started, true, 'discovery reported as started')
 
   const stopped = new Promise((resolve) => adapter.once('discovering', resolve))
 
-  adapter.stopDiscovery()
+  await adapter.stopDiscovery()
   t.is(await stopped, false, 'discovery reported as stopped')
 })
