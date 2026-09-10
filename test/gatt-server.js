@@ -118,6 +118,48 @@ test('registerApplication rejects if already registered', { skip: isCI }, async 
   await adapter.unregisterApplication(app)
 })
 
+test('registerApplication with two services', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+
+  const app = new GattApplication({ path: '/com/test/gatt' })
+
+  const heart = new GattService({ uuid: '12345678-1234-1234-1234-123456789abc' })
+  const measurement = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab1',
+    flags: ['read', 'notify']
+  })
+  const control = new GattCharacteristic({
+    uuid: '12345678-1234-1234-1234-123456789ab2',
+    flags: ['write']
+  })
+  heart.addCharacteristic(measurement)
+  heart.addCharacteristic(control)
+
+  const battery = new GattService({ uuid: '12345678-1234-1234-1234-123456789abd' })
+  battery.addCharacteristic(
+    new GattCharacteristic({
+      uuid: '12345678-1234-1234-1234-123456789ab3',
+      flags: ['read']
+    })
+  )
+
+  app.addService(heart)
+  app.addService(battery)
+
+  await adapter.registerApplication(app)
+
+  t.execution(() => {
+    measurement.value = new Uint8Array([0x01])
+  })
+
+  await adapter.unregisterApplication(app)
+
+  await adapter.registerApplication(app)
+  t.pass('registered again after unregister')
+
+  await adapter.unregisterApplication(app)
+})
+
 test('characteristic value setter throws after unregister', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
 

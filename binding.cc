@@ -474,8 +474,6 @@ struct bare_bluetooth_linux_local_service_t {
 struct bare_bluetooth_linux_gatt_app_t {
   std::string path;
   std::vector<bare_bluetooth_linux_local_service_t> services;
-  std::unordered_map<std::string, bare_bluetooth_linux_local_service_t *> service_map;
-  std::unordered_map<std::string, bare_bluetooth_linux_local_characteristic_t *> characteristic_map;
 
   std::mutex reads_lock;
   std::unordered_map<uint32_t, DBusMessage *> pending_reads;
@@ -1008,8 +1006,6 @@ bare_bluetooth_linux__on_gatt_unregister_notify(DBusPendingCall *pending, void *
     dbus_connection_unregister_object_path(adapter->signal_conn, adapter->gatt_app.path.c_str());
     adapter->gatt_app.path.clear();
     adapter->gatt_app.services.clear();
-    adapter->gatt_app.service_map.clear();
-    adapter->gatt_app.characteristic_map.clear();
 
     std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
     for (auto &[id, msg] : adapter->gatt_app.pending_reads) {
@@ -1733,6 +1729,25 @@ bare_bluetooth_linux__gatt_append_characteristic_props(DBusMessageIter *dict, co
   dbus_dict_append_bool(dict, "Notifying", notifying);
 }
 
+// Linear scans: counts are tiny, and pointers into these vectors dangle on push_back
+static bare_bluetooth_linux_local_service_t *
+bare_bluetooth_linux__gatt_find_service(bare_bluetooth_linux_gatt_app_t &app, const char *path) {
+  for (auto &svc : app.services) {
+    if (svc.path == path) return &svc;
+  }
+  return nullptr;
+}
+
+static bare_bluetooth_linux_local_characteristic_t *
+bare_bluetooth_linux__gatt_find_characteristic(bare_bluetooth_linux_gatt_app_t &app, const char *path) {
+  for (auto &svc : app.services) {
+    for (auto &ch : svc.characteristics) {
+      if (ch.path == path) return &ch;
+    }
+  }
+  return nullptr;
+}
+
 static DBusHandlerResult
 bare_bluetooth_linux__gatt_message_handler(
   DBusConnection *conn, DBusMessage *msg, void *user_data
@@ -1795,30 +1810,30 @@ bare_bluetooth_linux__gatt_message_handler(
   }
 
   if (dbus_message_is_method_call(msg, DBUS_PROP_IFACE, "GetAll")) {
-    auto svc_it = adapter->gatt_app.service_map.find(path);
-    if (svc_it != adapter->gatt_app.service_map.end()) {
+    auto *svc = bare_bluetooth_linux__gatt_find_service(adapter->gatt_app, path);
+    if (svc != nullptr) {
       DBusMessage *reply = dbus_message_new_method_return(msg);
       if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
 
       DBusMessageIter iter, dict;
       dbus_message_iter_init_append(reply, &iter);
       dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-      bare_bluetooth_linux__gatt_append_service_props(&dict, *svc_it->second, "UUID", "Primary");
+      bare_bluetooth_linux__gatt_append_service_props(&dict, *svc, "UUID", "Primary");
       dbus_message_iter_close_container(&iter, &dict);
       dbus_connection_send(conn, reply, nullptr);
       dbus_message_unref(reply);
       return DBUS_HANDLER_RESULT_HANDLED;
     }
 
-    auto ch_it = adapter->gatt_app.characteristic_map.find(path);
-    if (ch_it != adapter->gatt_app.characteristic_map.end()) {
+    auto *ch = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path);
+    if (ch != nullptr) {
       DBusMessage *reply = dbus_message_new_method_return(msg);
       if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
 
       DBusMessageIter iter, dict;
       dbus_message_iter_init_append(reply, &iter);
       dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict);
-      bare_bluetooth_linux__gatt_append_characteristic_props(&dict, *ch_it->second, "UUID", "Service", "Flags", "Value");
+      bare_bluetooth_linux__gatt_append_characteristic_props(&dict, *ch, "UUID", "Service", "Flags", "Value");
       dbus_message_iter_close_container(&iter, &dict);
       dbus_connection_send(conn, reply, nullptr);
       dbus_message_unref(reply);
@@ -1829,8 +1844,7 @@ bare_bluetooth_linux__gatt_message_handler(
   }
 
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "ReadValue")) {
-    auto it = adapter->gatt_app.characteristic_map.find(path);
-    if (it != adapter->gatt_app.characteristic_map.end()) {
+    if (bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path) != nullptr) {
       uint32_t id = dbus_message_get_serial(msg);
 
       bare_bluetooth_linux_gatt_options_t options;
@@ -1854,9 +1868,9 @@ bare_bluetooth_linux__gatt_message_handler(
   }
 
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "WriteValue")) {
-    auto it = adapter->gatt_app.characteristic_map.find(path);
-    if (it != adapter->gatt_app.characteristic_map.end()) {
-      auto &ch = *it->second;
+    auto *found = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path);
+    if (found != nullptr) {
+      auto &ch = *found;
       DBusMessageIter args;
       if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
         DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
@@ -1897,9 +1911,9 @@ bare_bluetooth_linux__gatt_message_handler(
 
   bool start = dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "StartNotify");
   if (start || dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "StopNotify")) {
-    auto it = adapter->gatt_app.characteristic_map.find(path);
-    if (it != adapter->gatt_app.characteristic_map.end()) {
-      auto &ch = *it->second;
+    auto *found = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path);
+    if (found != nullptr) {
+      auto &ch = *found;
 
       DBusMessage *reply = dbus_message_new_method_return(msg);
       if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
@@ -3065,7 +3079,6 @@ bare_bluetooth_linux_gatt_service_add(
   int32_t idx = static_cast<int32_t>(adapter->gatt_app.services.size());
   svc.path = app_path + "/service" + std::to_string(idx);
   adapter->gatt_app.services.push_back(std::move(svc));
-  adapter->gatt_app.service_map[adapter->gatt_app.services.back().path] = &adapter->gatt_app.services.back();
   return idx;
 }
 
@@ -3094,7 +3107,6 @@ bare_bluetooth_linux_gatt_characteristic_add(
   int32_t idx = static_cast<int32_t>(svc.characteristics.size());
   ch.path = svc.path + "/char" + std::to_string(idx);
   svc.characteristics.push_back(std::move(ch));
-  adapter->gatt_app.characteristic_map[svc.characteristics.back().path] = &svc.characteristics.back();
   return svc.characteristics.back().path;
 }
 
@@ -3158,21 +3170,17 @@ static void
 bare_bluetooth_linux_gatt_characteristic_set_value(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string char_path, js_typedarray_t<uint8_t> value
 ) {
-  for (auto &svc : adapter->gatt_app.services) {
-    for (auto &ch : svc.characteristics) {
-      if (ch.path == char_path) {
-        uint8_t *data;
-        size_t len;
-        int err = js_get_typedarray_info(env, value, data, len);
-        assert(err == 0);
+  auto *ch = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, char_path.c_str());
+  if (ch == nullptr) return;
 
-        ch.value.assign(data, data + len);
+  uint8_t *data;
+  size_t len;
+  int err = js_get_typedarray_info(env, value, data, len);
+  assert(err == 0);
 
-        bare_bluetooth_linux__gatt_emit_value_changed(adapter->signal_conn, ch.path.c_str(), ch.value);
-        return;
-      }
-    }
-  }
+  ch->value.assign(data, data + len);
+
+  bare_bluetooth_linux__gatt_emit_value_changed(adapter->signal_conn, ch->path.c_str(), ch->value);
 }
 
 static void
