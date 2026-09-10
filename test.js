@@ -6,6 +6,7 @@ if (!isCI && !poweredAdapter()) {
   console.error('Bluetooth is off on this device, enable it and run again')
   Bare.exitCode = 1
 } else {
+  require('./test/errors')
   require('./test/adapter')
   require('./test/device')
   require('./test/service')
