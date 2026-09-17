@@ -3150,19 +3150,24 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
   bare_bluetooth_linux__gatt_emit_value_changed(adapter->signal_conn, ch->path.c_str(), ch->value);
 }
 
+static DBusMessage *
+bare_bluetooth_linux__gatt_take_read(bare_bluetooth_linux_adapter_t *adapter, uint32_t id) {
+  std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
+
+  auto it = adapter->gatt_app.pending_reads.find(id);
+  if (it == adapter->gatt_app.pending_reads.end()) return nullptr;
+
+  DBusMessage *msg = it->second;
+  adapter->gatt_app.pending_reads.erase(it);
+  return msg;
+}
+
 static void
 bare_bluetooth_linux_gatt_characteristic_respond_read(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, js_typedarray_t<uint8_t> value
 ) {
-  DBusMessage *msg = nullptr;
-
-  {
-    std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
-    auto it = adapter->gatt_app.pending_reads.find(id);
-    if (it == adapter->gatt_app.pending_reads.end()) return;
-    msg = it->second;
-    adapter->gatt_app.pending_reads.erase(it);
-  }
+  DBusMessage *msg = bare_bluetooth_linux__gatt_take_read(&*adapter, id);
+  if (msg == nullptr) return;
 
   uint8_t *data;
   size_t len;
@@ -3185,6 +3190,24 @@ bare_bluetooth_linux_gatt_characteristic_respond_read(
 
   dbus_connection_send(adapter->signal_conn, reply, nullptr);
   dbus_message_unref(reply);
+  dbus_message_unref(msg);
+}
+
+// The ATT error BlueZ sends back is derived from the D-Bus error name; a
+// "org.bluez.Error.Failed" whose message is "0x80".."0x9f" is passed through as
+// that application error code
+static void
+bare_bluetooth_linux_gatt_characteristic_respond_read_error(
+  js_env_t *, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, std::string name, std::string message
+) {
+  DBusMessage *msg = bare_bluetooth_linux__gatt_take_read(&*adapter, id);
+  if (msg == nullptr) return;
+
+  DBusMessage *reply = dbus_message_new_error(msg, name.c_str(), message.c_str());
+  if (reply != nullptr) {
+    dbus_connection_send(adapter->signal_conn, reply, nullptr);
+    dbus_message_unref(reply);
+  }
   dbus_message_unref(msg);
 }
 
@@ -4168,6 +4191,7 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("gattUnregister", bare_bluetooth_linux_gatt_unregister)
   V("gattCharacteristicSetValue", bare_bluetooth_linux_gatt_characteristic_set_value)
   V("gattCharacteristicRespondRead", bare_bluetooth_linux_gatt_characteristic_respond_read)
+  V("gattCharacteristicRespondReadError", bare_bluetooth_linux_gatt_characteristic_respond_read_error)
   V("agentRegister", bare_bluetooth_linux_agent_register)
   V("agentRequestDefault", bare_bluetooth_linux_agent_request_default)
   V("agentUnregister", bare_bluetooth_linux_agent_unregister)
