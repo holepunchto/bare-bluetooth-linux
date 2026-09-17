@@ -3193,9 +3193,6 @@ bare_bluetooth_linux_gatt_characteristic_respond_read(
   dbus_message_unref(msg);
 }
 
-// The ATT error BlueZ sends back is derived from the D-Bus error name; a
-// "org.bluez.Error.Failed" whose message is "0x80".."0x9f" is passed through as
-// that application error code
 static void
 bare_bluetooth_linux_gatt_characteristic_respond_read_error(
   js_env_t *, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, std::string name, std::string message
