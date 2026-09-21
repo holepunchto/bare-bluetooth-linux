@@ -30,13 +30,13 @@ For the GATT server, the pairing agent and the request options are checked by ha
 bare test/manual-gatt.js
 ```
 
-The script walks you through it. It first lists the bonds this machine still holds and offers to forget one, then publishes a Heart Rate service and prints the five steps to follow on the phone. Each step ticks off what it observes - the agent answering a pairing, the subscription, the read, the write, the device path carried in the request options - and it prints its own summary once all six are seen:
+The script walks you through it. It first lists the bonds this machine still holds and offers to forget one, then publishes a Heart Rate service and prints the five steps to follow on the phone. Each step ticks off what it observes - the agent answering a pairing, the subscription, the read, the write, the device path carried in the request options - and it prints its own summary once all seven are seen:
 
 ```
-  [ok] central connected  -- 6F:15:84:82:41:E7   (1/6)
-  [ok] agent answered a pairing request  -- authorization   (2/6)
+  [ok] central connected  -- 6F:15:84:82:41:E7   (1/7)
+  [ok] agent answered a pairing request  -- authorization   (2/7)
   ...
-all 6 checks observed, the gatt server works end to end
+all 7 checks observed, the gatt server works end to end
 ```
 
 You need a BLE explorer on the phone: nRF Connect or LightBlue, both free.

@@ -450,8 +450,8 @@ struct bare_bluetooth_linux_gatt_app_t {
   std::string path;
   std::vector<bare_bluetooth_linux_local_service_t> services;
 
-  std::mutex reads_lock;
-  std::unordered_map<uint32_t, DBusMessage *> pending_reads;
+  std::mutex requests_lock;
+  std::unordered_map<uint32_t, DBusMessage *> pending_requests;
 };
 
 struct bare_bluetooth_linux_gatt_options_t {
@@ -465,6 +465,7 @@ struct bare_bluetooth_linux_gatt_options_t {
 
 struct bare_bluetooth_linux_gatt_characteristic_write_event_t {
   std::string path;
+  uint32_t id;
   std::vector<uint8_t> value;
   bare_bluetooth_linux_gatt_options_t options;
 };
@@ -491,7 +492,7 @@ struct bare_bluetooth_linux_gatt_characteristic_notifying_event_t {
 };
 
 using bare_bluetooth_linux__on_gatt_characteristic_write_fn =
-  js_function_t<void, js_receiver_t, std::string, js_arraybuffer_t, uint32_t, std::string, uint32_t, std::string, std::string, bool>;
+  js_function_t<void, js_receiver_t, std::string, uint32_t, js_arraybuffer_t, uint32_t, std::string, uint32_t, std::string, std::string, bool>;
 
 using bare_bluetooth_linux__on_gatt_characteristic_notifying_fn =
   js_function_t<void, js_receiver_t, std::string, bool>;
@@ -949,7 +950,7 @@ bare_bluetooth_linux__on_gatt_characteristic_write(
   err = js_create_arraybuffer(env, event->value, buffer);
   assert(err == 0);
 
-  js_call_function(env, function, js_receiver_t(receiver), event->path, buffer, event->options.offset, event->options.type, event->options.mtu, event->options.device, event->options.link, event->options.prepare_authorize);
+  js_call_function(env, function, js_receiver_t(receiver), event->path, event->id, buffer, event->options.offset, event->options.type, event->options.mtu, event->options.device, event->options.link, event->options.prepare_authorize);
 
   delete event;
 
@@ -982,11 +983,11 @@ bare_bluetooth_linux__on_gatt_unregister_notify(DBusPendingCall *pending, void *
     adapter->gatt_app.path.clear();
     adapter->gatt_app.services.clear();
 
-    std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
-    for (auto &[id, msg] : adapter->gatt_app.pending_reads) {
+    std::lock_guard<std::mutex> guard(adapter->gatt_app.requests_lock);
+    for (auto &[id, msg] : adapter->gatt_app.pending_requests) {
       dbus_message_unref(msg);
     }
-    adapter->gatt_app.pending_reads.clear();
+    adapter->gatt_app.pending_requests.clear();
   }
 
   js_call_threadsafe_function(adapter->tsfn_method_reply, call, js_threadsafe_function_nonblocking);
@@ -1827,8 +1828,8 @@ bare_bluetooth_linux__gatt_message_handler(
       if (dbus_message_iter_init(msg, &args)) options = bare_bluetooth_linux__gatt_options(&args);
 
       {
-        std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
-        adapter->gatt_app.pending_reads[id] = dbus_message_ref(msg);
+        std::lock_guard<std::mutex> guard(adapter->gatt_app.requests_lock);
+        adapter->gatt_app.pending_requests[id] = dbus_message_ref(msg);
       }
 
       auto *event = new bare_bluetooth_linux_gatt_characteristic_read_event_t;
@@ -1843,9 +1844,7 @@ bare_bluetooth_linux__gatt_message_handler(
   }
 
   if (dbus_message_is_method_call(msg, BLUEZ_GATT_CHAR_IFACE, "WriteValue")) {
-    auto *found = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path);
-    if (found != nullptr) {
-      auto &ch = *found;
+    if (bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, path) != nullptr) {
       DBusMessageIter args;
       if (!dbus_message_iter_init(msg, &args) || dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
         DBusMessage *error = dbus_message_new_error(msg, "org.bluez.Error.InvalidArguments", "Expected byte array");
@@ -1863,22 +1862,22 @@ bare_bluetooth_linux__gatt_message_handler(
       int len;
       dbus_message_iter_get_fixed_array(&array_iter, &bytes, &len);
 
-      // Reply allocated before any side effect so a NEED_MEMORY retry is idempotent
-      DBusMessage *reply = dbus_message_new_method_return(msg);
-      if (reply == nullptr) return DBUS_HANDLER_RESULT_NEED_MEMORY;
-
-      ch.value.assign(bytes, bytes + len);
-
       dbus_message_iter_next(&args);
+
+      uint32_t id = dbus_message_get_serial(msg);
+
+      {
+        std::lock_guard<std::mutex> guard(adapter->gatt_app.requests_lock);
+        adapter->gatt_app.pending_requests[id] = dbus_message_ref(msg);
+      }
 
       auto *event = new bare_bluetooth_linux_gatt_characteristic_write_event_t;
       event->path = path;
+      event->id = id;
       event->value.assign(bytes, bytes + len);
       event->options = bare_bluetooth_linux__gatt_options(&args);
       js_call_threadsafe_function(adapter->tsfn_gatt_characteristic_write, event, js_threadsafe_function_nonblocking);
 
-      dbus_connection_send(conn, reply, nullptr);
-      dbus_message_unref(reply);
       return DBUS_HANDLER_RESULT_HANDLED;
     }
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
@@ -3151,14 +3150,14 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
 }
 
 static DBusMessage *
-bare_bluetooth_linux__gatt_take_read(bare_bluetooth_linux_adapter_t *adapter, uint32_t id) {
-  std::lock_guard<std::mutex> guard(adapter->gatt_app.reads_lock);
+bare_bluetooth_linux__gatt_take_request(bare_bluetooth_linux_adapter_t *adapter, uint32_t id) {
+  std::lock_guard<std::mutex> guard(adapter->gatt_app.requests_lock);
 
-  auto it = adapter->gatt_app.pending_reads.find(id);
-  if (it == adapter->gatt_app.pending_reads.end()) return nullptr;
+  auto it = adapter->gatt_app.pending_requests.find(id);
+  if (it == adapter->gatt_app.pending_requests.end()) return nullptr;
 
   DBusMessage *msg = it->second;
-  adapter->gatt_app.pending_reads.erase(it);
+  adapter->gatt_app.pending_requests.erase(it);
   return msg;
 }
 
@@ -3166,7 +3165,7 @@ static void
 bare_bluetooth_linux_gatt_characteristic_respond_read(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, js_typedarray_t<uint8_t> value
 ) {
-  DBusMessage *msg = bare_bluetooth_linux__gatt_take_read(&*adapter, id);
+  DBusMessage *msg = bare_bluetooth_linux__gatt_take_request(&*adapter, id);
   if (msg == nullptr) return;
 
   uint8_t *data;
@@ -3194,10 +3193,35 @@ bare_bluetooth_linux_gatt_characteristic_respond_read(
 }
 
 static void
-bare_bluetooth_linux_gatt_characteristic_respond_read_error(
+bare_bluetooth_linux_gatt_characteristic_respond_write(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, js_typedarray_t<uint8_t> value
+) {
+  DBusMessage *msg = bare_bluetooth_linux__gatt_take_request(&*adapter, id);
+  if (msg == nullptr) return;
+
+  auto *ch = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, dbus_message_get_path(msg));
+  if (ch != nullptr) {
+    uint8_t *data;
+    size_t len;
+    int err = js_get_typedarray_info(env, value, data, len);
+    assert(err == 0);
+
+    ch->value.assign(data, data + len);
+  }
+
+  DBusMessage *reply = dbus_message_new_method_return(msg);
+  if (reply != nullptr) {
+    dbus_connection_send(adapter->signal_conn, reply, nullptr);
+    dbus_message_unref(reply);
+  }
+  dbus_message_unref(msg);
+}
+
+static void
+bare_bluetooth_linux_gatt_respond_error(
   js_env_t *, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, uint32_t id, std::string name, std::string message
 ) {
-  DBusMessage *msg = bare_bluetooth_linux__gatt_take_read(&*adapter, id);
+  DBusMessage *msg = bare_bluetooth_linux__gatt_take_request(&*adapter, id);
   if (msg == nullptr) return;
 
   DBusMessage *reply = dbus_message_new_error(msg, name.c_str(), message.c_str());
@@ -4188,7 +4212,8 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("gattUnregister", bare_bluetooth_linux_gatt_unregister)
   V("gattCharacteristicSetValue", bare_bluetooth_linux_gatt_characteristic_set_value)
   V("gattCharacteristicRespondRead", bare_bluetooth_linux_gatt_characteristic_respond_read)
-  V("gattCharacteristicRespondReadError", bare_bluetooth_linux_gatt_characteristic_respond_read_error)
+  V("gattCharacteristicRespondWrite", bare_bluetooth_linux_gatt_characteristic_respond_write)
+  V("gattRespondError", bare_bluetooth_linux_gatt_respond_error)
   V("agentRegister", bare_bluetooth_linux_agent_register)
   V("agentRequestDefault", bare_bluetooth_linux_agent_request_default)
   V("agentUnregister", bare_bluetooth_linux_agent_unregister)
