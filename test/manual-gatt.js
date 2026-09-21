@@ -24,6 +24,7 @@ const checks = {
   'central subscribed (StartNotify)': false,
   'central read (ReadValue)': false,
   'central wrote (WriteValue)': false,
+  'central saw a refused write': false,
   'request options carried a device path': false
 }
 
@@ -77,6 +78,19 @@ characteristic.on('write', (value, options) => {
   pass('central wrote (WriteValue)', '[' + Array.from(value).join(', ') + ']')
   if (options.device) pass('request options carried a device path', options.device)
 })
+
+// Every write here is refused, so the phone must show an error for it
+const refusing = new GattCharacteristic({
+  uuid: '00002a39-0000-1000-8000-00805f9b34fb',
+  flags: ['write']
+})
+
+refusing.write = () => {
+  pass('central saw a refused write', 'answered NotPermitted')
+  const err = new Error('this one refuses everything')
+  err.code = 'NotPermitted'
+  throw err
+}
 
 let pushing = null
 
@@ -163,12 +177,7 @@ async function main() {
   // A second characteristic and a second service on purpose: the checks all hit
   // the first characteristic, whose registration used to dangle once more were added
   service.addCharacteristic(characteristic)
-  service.addCharacteristic(
-    new GattCharacteristic({
-      uuid: '00002a39-0000-1000-8000-00805f9b34fb',
-      flags: ['write']
-    })
-  )
+  service.addCharacteristic(refusing)
 
   const battery = new GattService({ uuid: '0000180f-0000-1000-8000-00805f9b34fb' })
   battery.addCharacteristic(
@@ -202,8 +211,9 @@ async function main() {
   console.log('  2. open Heart Rate > Heart Rate Measurement')
   console.log('  3. tap notify, the value counts up      -> subscribed')
   console.log('  4. tap read                             -> read, request options')
-  console.log('  5. tap write, send any bytes            -> written\n')
-  console.log('the summary prints itself once all 6 are seen, ctrl-c to stop\n')
+  console.log('  5. tap write, send any bytes            -> written')
+  console.log('  6. open Heart Rate Control Point, write  -> refused, phone shows an error\n')
+  console.log('the summary prints itself once all 7 are seen, ctrl-c to stop\n')
 
   for (const device of adapter.devices.values()) watch(device)
 
