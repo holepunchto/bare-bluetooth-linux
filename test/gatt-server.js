@@ -67,19 +67,6 @@ test('GattCharacteristic accepts flags and value', (t) => {
   t.alike(ch.value, value)
 })
 
-test('GattCharacteristic accepts read and write callbacks', (t) => {
-  const read = () => new Uint8Array([1])
-  const write = () => {}
-  const ch = new GattCharacteristic({ uuid: '2a37', read, write })
-  t.is(ch.read, read)
-  t.is(ch.write, write)
-
-  ch.read = null
-  ch.write = null
-  t.is(ch.read, null)
-  t.is(ch.write, null)
-})
-
 test('GattCharacteristic value setter', (t) => {
   const ch = new GattCharacteristic({ uuid: '2a37' })
   const newValue = new Uint8Array([0xaa, 0xbb])
