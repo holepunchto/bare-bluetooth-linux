@@ -2447,15 +2447,25 @@ bare_bluetooth_linux_adapter_get_address(
 
 static void
 bare_bluetooth_linux_adapter_set_discovery_filter(
-  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::vector<std::string> uuids, std::optional<int32_t> rssi, std::optional<std::string> transport
+  js_env_t *env,
+  js_receiver_t,
+  js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter,
+  std::vector<std::string> uuids,
+  std::optional<int32_t> rssi,
+  std::optional<std::string> transport,
+  js_function_t<void, js_object_t> callback
 ) {
+  auto *call = new bare_bluetooth_linux_async_call_t();
+  call->env = env;
+  call->adapter = &*adapter;
+
+  int err;
+  err = js_create_reference(env, callback, call->cb);
+  assert(err == 0);
+
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "SetDiscoveryFilter");
-  if (msg == nullptr) {
-    int err = js_throw_error(env, nullptr, "Failed to create D-Bus message");
-    assert(err == 0);
-    return;
-  }
+  if (msg == nullptr) return bare_bluetooth_linux__fail_call(call, adapter->tsfn_method_reply);
 
   DBusMessageIter iter, dict;
   dbus_message_iter_init_append(msg, &iter);
@@ -2467,19 +2477,7 @@ bare_bluetooth_linux_adapter_set_discovery_filter(
 
   dbus_message_iter_close_container(&iter, &dict);
 
-  DBusError dbus_err;
-  dbus_error_init(&dbus_err);
-  DBusMessage *reply =
-    dbus_connection_send_with_reply_and_block(adapter->conn, msg, DBUS_TIMEOUT, &dbus_err);
-  dbus_message_unref(msg);
-
-  if (reply) dbus_message_unref(reply);
-
-  if (dbus_error_is_set(&dbus_err)) {
-    int err = js_throw_error(env, nullptr, dbus_err.message);
-    assert(err == 0);
-    dbus_error_free(&dbus_err);
-  }
+  bare_bluetooth_linux__send_call(adapter->signal_conn, msg, DBUS_TIMEOUT, call, bare_bluetooth_linux__on_pending_call_notify, adapter->tsfn_method_reply);
 }
 
 static std::optional<std::string>

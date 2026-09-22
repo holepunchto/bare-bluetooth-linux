@@ -59,9 +59,9 @@ test('accessors after destroy do not reach a closed connection', async (t) => {
 
   t.execution(() => {
     adapter.powered = true
-    adapter.setDiscoveryFilter({ rssi: -70 })
   })
 
+  await t.exception(() => adapter.setDiscoveryFilter({ rssi: -70 }), /destroyed/)
   await t.exception(() => adapter.startDiscovery(), /destroyed/)
   await t.exception(() => adapter.stopDiscovery(), /destroyed/)
 })
@@ -98,19 +98,41 @@ test('startDiscovery', { skip: isCI }, async (t) => {
   await t.execution(() => adapter.startDiscovery())
 })
 
-test('setDiscoveryFilter with uuids', { skip: isCI }, (t) => {
+test('setDiscoveryFilter with uuids', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
-  t.execution(() => adapter.setDiscoveryFilter({ uuids: ['0000180a-0000-1000-8000-00805f9b34fb'] }))
+  await t.execution(() =>
+    adapter.setDiscoveryFilter({ uuids: ['0000180a-0000-1000-8000-00805f9b34fb'] })
+  )
 })
 
-test('setDiscoveryFilter with rssi', { skip: isCI }, (t) => {
+test('setDiscoveryFilter with rssi', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
-  t.execution(() => adapter.setDiscoveryFilter({ rssi: -70 }))
+  await t.execution(() => adapter.setDiscoveryFilter({ rssi: -70 }))
 })
 
-test('setDiscoveryFilter with transport', { skip: isCI }, (t) => {
+test('setDiscoveryFilter with transport', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
-  t.execution(() => adapter.setDiscoveryFilter({ transport: 'le' }))
+  await t.execution(() => adapter.setDiscoveryFilter({ transport: 'le' }))
+})
+
+test('a uuid nobody advertises reports no device', { skip: isCI, timeout: 10000 }, async (t) => {
+  using adapter = new Adapter()
+
+  await new Promise((resolve) => setTimeout(resolve, 200))
+
+  let reported = 0
+  adapter.on('device', (device) => {
+    reported++
+    device.on('rssi', () => reported++)
+  })
+  for (const device of adapter.devices.values()) device.on('rssi', () => reported++)
+
+  await adapter.setDiscoveryFilter({ uuids: ['0000dead-0000-1000-8000-00805f9b34fb'] })
+  await adapter.startDiscovery()
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+  await adapter.stopDiscovery()
+
+  t.is(reported, 0, 'nothing advertises that uuid, so nothing is reported')
 })
 
 test('stopDiscovery', { skip: isCI }, async (t) => {
@@ -120,20 +142,20 @@ test('stopDiscovery', { skip: isCI }, async (t) => {
   await t.execution(() => adapter.stopDiscovery())
 })
 
-test('discovery emits device event', { skip: isCI, timeout: 10000 }, async (t) => {
+test('discovery reports a device it hears', { skip: isCI, timeout: 20000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+  const heard = new Promise((resolve) => {
+    adapter.on('device', (device) => device.once('rssi', (rssi) => resolve({ device, rssi })))
   })
 
   await adapter.startDiscovery()
 
-  const device = await found
+  const { device, rssi } = await heard
 
   await adapter.stopDiscovery()
 
-  t.ok(device)
+  t.is(typeof rssi, 'number', 'rssi: ' + rssi)
   t.ok(adapter.devices.has(device.path))
 })
 
