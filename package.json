@@ -1,6 +1,6 @@
 {
   "name": "bare-bluetooth-linux",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "BlueZ D-Bus bindings for Bare",
   "exports": {
     "./package": "./package.json",
