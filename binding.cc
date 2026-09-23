@@ -3135,7 +3135,10 @@ bare_bluetooth_linux_gatt_characteristic_set_value(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string char_path, js_typedarray_t<uint8_t> value
 ) {
   auto *ch = bare_bluetooth_linux__gatt_find_characteristic(adapter->gatt_app, char_path.c_str());
-  if (ch == nullptr) return;
+  if (ch == nullptr) {
+    js_throw_error(env, nullptr, "Unknown characteristic path");
+    return;
+  }
 
   uint8_t *data;
   size_t len;
