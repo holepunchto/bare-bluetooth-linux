@@ -67,11 +67,12 @@ test('GattCharacteristic accepts flags and value', (t) => {
   t.alike(ch.value, value)
 })
 
-test('GattCharacteristic value setter', (t) => {
+test('GattCharacteristic value setter throws before registration', (t) => {
   const ch = new GattCharacteristic({ uuid: '2a37' })
-  const newValue = new Uint8Array([0xaa, 0xbb])
-  ch.value = newValue
-  t.alike(ch.value, newValue)
+  t.is(ch.registered, false)
+  t.exception(() => {
+    ch.value = new Uint8Array([0xaa, 0xbb])
+  }, /not registered/)
 })
 
 test('full GATT tree assembly', (t) => {
@@ -173,9 +174,12 @@ test('characteristic value setter throws after unregister', { skip: isCI }, asyn
   app.addService(svc)
 
   await adapter.registerApplication(app)
+  t.is(ch.registered, true)
+
   await adapter.unregisterApplication(app)
+  t.is(ch.registered, false)
 
   t.exception(() => {
     ch.value = new Uint8Array([0x01])
-  })
+  }, /not registered/)
 })
