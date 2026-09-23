@@ -132,15 +132,15 @@ test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, 
   t.ok(typeof device.path === 'string')
 })
 
-test('device methods after adapter destroy', { skip: isCI }, (t) => {
+test('device methods reject once the adapter is destroyed', { skip: isCI }, async (t) => {
   const adapter = new Adapter()
   const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
 
   adapter.destroy()
 
-  t.is(device.connect(), undefined)
-  t.is(device.disconnect(), undefined)
-  t.is(device.pair(), undefined)
+  await t.exception(() => device.connect(), /destroyed/)
+  await t.exception(() => device.disconnect(), /destroyed/)
+  await t.exception(() => device.pair(), /destroyed/)
 })
 
 let eventAdapter
