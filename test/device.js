@@ -25,6 +25,7 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(device.addressType === 'public' || device.addressType === 'random')
   t.ok(typeof device.path === 'string')
   t.ok(device.name === undefined || typeof device.name === 'string')
+  t.ok(device.preferredBearer === undefined || typeof device.preferredBearer === 'string')
   t.ok(device.rssi === undefined || typeof device.rssi === 'number')
   t.ok(typeof device.paired === 'boolean')
   t.ok(typeof device.connected === 'boolean')
@@ -32,6 +33,29 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   t.ok(typeof device.manufacturerData === 'object')
   t.ok(typeof device.serviceData === 'object')
   t.ok(typeof device.servicesResolved === 'boolean')
+})
+
+test('device preferred bearer', { skip: isCI, timeout: 10000 }, async (t) => {
+  using adapter = new Adapter()
+
+  // PreferredBearer is optional per device, so wait for one that has it
+  const found = new Promise((resolve) => {
+    adapter.on('device', (device) => {
+      if (device.preferredBearer !== undefined) resolve(device)
+    })
+  })
+
+  await adapter.startDiscovery()
+
+  const device = await found
+
+  await adapter.stopDiscovery()
+
+  device.preferredBearer = 'le'
+  t.is(device.preferredBearer, 'le')
+
+  device.preferredBearer = 'last-used'
+  t.is(device.preferredBearer, 'last-used')
 })
 
 test('device emits rssi', { skip: isCI, timeout: 20000 }, async (t) => {
