@@ -106,6 +106,16 @@ dbus_type_code() {
   else if constexpr (std::is_same_v<T, uint32_t>) return DBUS_TYPE_UINT32;
   else if constexpr (std::is_same_v<T, int64_t>) return DBUS_TYPE_INT64;
   else if constexpr (std::is_same_v<T, uint64_t>) return DBUS_TYPE_UINT64;
+  else if constexpr (std::is_same_v<T, bool>) return DBUS_TYPE_BOOLEAN;
+  else if constexpr (std::is_same_v<T, std::string>) return DBUS_TYPE_STRING;
+}
+
+template <typename T>
+static auto
+dbus_wire_value(const T &value) {
+  if constexpr (std::is_same_v<T, bool>) return static_cast<dbus_bool_t>(value ? TRUE : FALSE);
+  else if constexpr (std::is_same_v<T, std::string>) return value.c_str();
+  else return value;
 }
 
 template <typename T>
@@ -200,8 +210,9 @@ dbus_find_string_in_props(DBusMessageIter *props_iter, const char *target_prop) 
   return std::nullopt;
 }
 
+template <typename T>
 static void
-dbus_set_bool_prop(js_env_t *env, DBusConnection *conn, const char *path, const char *iface, const char *prop, bool value) {
+dbus_set_prop(js_env_t *env, DBusConnection *conn, const char *path, const char *iface, const char *prop, const T &value) {
   DBusMessage *msg =
     dbus_message_new_method_call(BLUEZ_BUS, path, DBUS_PROP_IFACE, "Set");
   if (msg == nullptr) {
@@ -215,9 +226,10 @@ dbus_set_bool_prop(js_env_t *env, DBusConnection *conn, const char *path, const 
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &iface);
   dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &prop);
 
-  dbus_bool_t val = value ? TRUE : FALSE;
-  dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT, "b", &variant);
-  dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN, &val);
+  const char signature[] = {static_cast<char>(dbus_type_code<T>()), '\0'};
+  dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT, signature, &variant);
+  auto val = dbus_wire_value(value);
+  dbus_message_iter_append_basic(&variant, dbus_type_code<T>(), &val);
   dbus_message_iter_close_container(&iter, &variant);
 
   DBusError err;
@@ -2428,7 +2440,7 @@ static void
 bare_bluetooth_linux_adapter_set_powered(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, bool value
 ) {
-  dbus_set_bool_prop(env, adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered", value);
+  dbus_set_prop(env, adapter->conn, adapter->adapter_path.c_str(), BLUEZ_ADAPTER_IFACE, "Powered", value);
 }
 
 static bool
@@ -2499,6 +2511,20 @@ bare_bluetooth_linux_device_get_name(
   js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
 ) {
   return dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "Name");
+}
+
+static std::optional<std::string>
+bare_bluetooth_linux_device_get_preferred_bearer(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path
+) {
+  return dbus_get_string_prop(adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "PreferredBearer");
+}
+
+static void
+bare_bluetooth_linux_device_set_preferred_bearer(
+  js_env_t *env, js_receiver_t, js_arraybuffer_span_of_t<bare_bluetooth_linux_adapter_t, 1> adapter, std::string path, std::string value
+) {
+  dbus_set_prop(env, adapter->conn, path.c_str(), BLUEZ_DEVICE_IFACE, "PreferredBearer", value);
 }
 
 static std::optional<int32_t>
@@ -4178,6 +4204,8 @@ bare_bluetooth_linux_exports(js_env_t *env, js_value_t *exports) {
   V("deviceGetAddress", bare_bluetooth_linux_device_get_address)
   V("deviceGetAddressType", bare_bluetooth_linux_device_get_address_type)
   V("deviceGetName", bare_bluetooth_linux_device_get_name)
+  V("deviceGetPreferredBearer", bare_bluetooth_linux_device_get_preferred_bearer)
+  V("deviceSetPreferredBearer", bare_bluetooth_linux_device_set_preferred_bearer)
   V("deviceGetRSSI", bare_bluetooth_linux_device_get_rssi)
   V("deviceGetPaired", bare_bluetooth_linux_device_get_paired)
   V("deviceGetConnected", bare_bluetooth_linux_device_get_connected)
