@@ -1,6 +1,6 @@
 const test = require('brittle')
 const { Adapter } = require('..')
-const { isCI } = require('./helpers')
+const { isCI, onAnyDevice } = require('./helpers')
 
 test('constructor sets default path', (t) => {
   using adapter = new Adapter()
@@ -149,6 +149,65 @@ test('a second startDiscovery rejects with SCAN_FAILED', { skip: isCI }, async (
   await adapter.stopDiscovery()
 })
 
+test(
+  'deviceCached replays what bluetoothd already holds',
+  { skip: isCI, timeout: 10000 },
+  async (t) => {
+    using adapter = new Adapter()
+
+    const cached = new Set()
+    adapter.on('deviceCached', (device) => cached.add(device))
+
+    const again = []
+    adapter.on('device', (device) => {
+      if (cached.has(device)) again.push(device)
+    })
+
+    await adapter.startDiscovery()
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+    await adapter.stopDiscovery()
+
+    if (cached.size === 0) {
+      t.pass('bluetoothd holds no device')
+      return
+    }
+
+    t.is(again.length, 0, 'a cached device is never reported as new')
+    for (const device of cached) t.is(adapter.devices.get(device.path), device, device.address)
+  }
+)
+
+test(
+  'device reports only what appears after attaching',
+  { skip: isCI, timeout: 20000 },
+  async (t) => {
+    using adapter = new Adapter()
+
+    const cached = new Set()
+    adapter.on('deviceCached', (device) => cached.add(device.path))
+
+    let fresh = null
+    adapter.on('device', (device) => {
+      if (!fresh) fresh = device
+    })
+
+    await adapter.startDiscovery()
+
+    for (let i = 0; i < 150 && !fresh; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+
+    await adapter.stopDiscovery()
+
+    if (!fresh) {
+      t.pass('no new device in range')
+      return
+    }
+
+    t.is(cached.has(fresh.path), false, fresh.address)
+  }
+)
+
 test('stopDiscovery', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
   await adapter.startDiscovery()
@@ -160,7 +219,7 @@ test('discovery reports a device it hears', { skip: isCI, timeout: 20000 }, asyn
   using adapter = new Adapter()
 
   const heard = new Promise((resolve) => {
-    adapter.on('device', (device) => device.once('rssi', (rssi) => resolve({ device, rssi })))
+    onAnyDevice(adapter, (device) => device.once('rssi', (rssi) => resolve({ device, rssi })))
   })
 
   await adapter.startDiscovery()
