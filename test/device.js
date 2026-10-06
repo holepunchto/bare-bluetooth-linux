@@ -38,11 +38,13 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
 test('device preferred bearer', { skip: isCI, timeout: 10000 }, async (t) => {
   using adapter = new Adapter()
 
-  // PreferredBearer is optional per device, so wait for one that has it
+  // BlueZ only exposes PreferredBearer on dual-mode devices, and only with
+  // Experimental = true in main.conf, so give up rather than time out
   const found = new Promise((resolve) => {
     adapter.on('device', (device) => {
       if (device.preferredBearer !== undefined) resolve(device)
     })
+    setTimeout(resolve, 5000, null)
   })
 
   await adapter.startDiscovery()
@@ -50,6 +52,11 @@ test('device preferred bearer', { skip: isCI, timeout: 10000 }, async (t) => {
   const device = await found
 
   await adapter.stopDiscovery()
+
+  if (!device) {
+    t.pass('no device exposes PreferredBearer')
+    return
+  }
 
   device.preferredBearer = 'le'
   t.is(device.preferredBearer, 'le')
@@ -154,6 +161,32 @@ test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, 
   t.is(device.connected, undefined)
   t.ok(typeof device.address === 'string')
   t.ok(typeof device.path === 'string')
+})
+
+test('connect to an unknown device rejects with CONNECTION_FAILED', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+  const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
+
+  try {
+    await device.connect()
+    t.fail('connect resolved')
+  } catch (err) {
+    t.is(err.code, 'CONNECTION_FAILED')
+    t.is(err.id, '00:00:00:00:00:00')
+  }
+})
+
+test('disconnect from an unknown device rejects with DISCONNECT', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+  const device = new Device(adapter, '/org/bluez/hci0/dev_00_00_00_00_00_00', '00:00:00:00:00:00')
+
+  try {
+    await device.disconnect()
+    t.fail('disconnect resolved')
+  } catch (err) {
+    t.is(err.code, 'DISCONNECT')
+    t.is(err.id, '00:00:00:00:00:00')
+  }
 })
 
 test('device methods reject once the adapter is destroyed', { skip: isCI }, async (t) => {
