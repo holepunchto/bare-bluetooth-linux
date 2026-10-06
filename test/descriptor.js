@@ -115,6 +115,33 @@ test('descriptor write resolves', { skip: isCI }, async (t) => {
   }
 })
 
+test(
+  'descriptors of a device connected before attaching are descriptorCached',
+  { skip: isCI, timeout: 30000 },
+  async (t) => {
+    if (!service) return t.pass('no service available')
+
+    // Attaching while the link is up: bluetoothd replays the whole GATT tree
+    using late = new Adapter()
+
+    const cached = await new Promise((resolve) => {
+      late.on('deviceCached', (d) => {
+        if (d.address !== device.address) return
+        d.on('serviceCached', (s) => {
+          s.on('characteristicCached', (c) => c.on('descriptorCached', resolve))
+        })
+      })
+    })
+
+    t.ok(cached instanceof Descriptor)
+
+    const known = [...device.services.values()]
+      .flatMap((s) => [...s.characteristics.values()])
+      .some((c) => c.descriptors.has(cached.path))
+    t.ok(known, cached.uuid)
+  }
+)
+
 hook('teardown', { skip: isCI }, async (t) => {
   if (device && device.connected) await device.disconnect()
   if (adapter) adapter.destroy()
