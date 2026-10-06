@@ -16,6 +16,15 @@ exports.onAnyDevice = function onAnyDevice(adapter, fn) {
   adapter.on('deviceCached', fn)
 }
 
+// The first device heard, cached or not
+exports.findDevice = async function findDevice(adapter) {
+  const found = new Promise((resolve) => exports.onAnyDevice(adapter, resolve))
+  await adapter.startDiscovery()
+  const device = await found
+  await adapter.stopDiscovery()
+  return device
+}
+
 exports.poweredAdapter = function poweredAdapter() {
   const adapter = new Adapter()
   let powered = false
