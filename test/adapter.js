@@ -135,6 +135,20 @@ test('a uuid nobody advertises reports no device', { skip: isCI, timeout: 10000 
   t.is(reported, 0, 'nothing advertises that uuid, so nothing is reported')
 })
 
+test('a second startDiscovery rejects with SCAN_FAILED', { skip: isCI }, async (t) => {
+  using adapter = new Adapter()
+  await adapter.startDiscovery()
+
+  try {
+    await adapter.startDiscovery()
+    t.fail('startDiscovery resolved')
+  } catch (err) {
+    t.is(err.code, 'SCAN_FAILED')
+  }
+
+  await adapter.stopDiscovery()
+})
+
 test('stopDiscovery', { skip: isCI }, async (t) => {
   using adapter = new Adapter()
   await adapter.startDiscovery()
