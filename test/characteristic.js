@@ -156,6 +156,29 @@ test('stopNotify disables notifications', { skip: isCI }, async (t) => {
   t.pass()
 })
 
+test(
+  'characteristics of a device connected before attaching are characteristicCached',
+  { skip: isCI, timeout: 30000 },
+  async (t) => {
+    if (!service) return t.pass('no service available')
+
+    // Attaching while the link is up: bluetoothd replays the whole GATT tree
+    using late = new Adapter()
+
+    const cached = await new Promise((resolve) => {
+      late.on('deviceCached', (d) => {
+        if (d.address !== device.address) return
+        d.on('serviceCached', (s) => {
+          if (s.path === service.path) s.on('characteristicCached', resolve)
+        })
+      })
+    })
+
+    t.ok(cached instanceof Characteristic)
+    t.ok(service.characteristics.has(cached.path), cached.uuid)
+  }
+)
+
 hook('teardown', { skip: isCI }, async (t) => {
   if (device) await device.disconnect()
   if (adapter) adapter.destroy()
