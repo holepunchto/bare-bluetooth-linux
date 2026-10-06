@@ -1,6 +1,6 @@
 const { test, hook } = require('brittle')
 const { Adapter, Descriptor } = require('..')
-const { isCI, onAnyDevice } = require('./helpers')
+const { isCI, findDevice } = require('./helpers')
 
 let adapter
 let device
@@ -19,15 +19,7 @@ function needsDescriptor(t) {
 hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  device = await found
-
-  await adapter.stopDiscovery()
+  device = await findDevice(adapter)
 
   try {
     await device.connect()
