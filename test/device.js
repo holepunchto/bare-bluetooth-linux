@@ -1,6 +1,6 @@
 const { test, hook } = require('brittle')
 const { Adapter, Device } = require('..')
-const { isCI } = require('./helpers')
+const { isCI, onAnyDevice } = require('./helpers')
 
 test('Device is exported', (t) => {
   t.is(typeof Device, 'function')
@@ -11,7 +11,7 @@ test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t)
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()
@@ -41,7 +41,7 @@ test('device preferred bearer', { skip: isCI, timeout: 10000 }, async (t) => {
   // BlueZ only exposes PreferredBearer on dual-mode devices, and only with
   // Experimental = true in main.conf, so give up rather than time out
   const found = new Promise((resolve) => {
-    adapter.on('device', (device) => {
+    onAnyDevice(adapter, (device) => {
       if (device.preferredBearer !== undefined) resolve(device)
     })
     setTimeout(resolve, 5000, null)
@@ -69,7 +69,7 @@ test('device emits rssi', { skip: isCI, timeout: 20000 }, async (t) => {
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', (device) => device.once('rssi', resolve))
+    onAnyDevice(adapter, (device) => device.once('rssi', resolve))
   })
 
   await adapter.startDiscovery()
@@ -85,7 +85,7 @@ test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()
@@ -119,7 +119,7 @@ test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()
@@ -145,7 +145,7 @@ test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, 
   const adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()
@@ -215,7 +215,7 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   eventAdapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    eventAdapter.on('device', resolve)
+    onAnyDevice(eventAdapter, resolve)
   })
 
   await eventAdapter.startDiscovery()
@@ -264,7 +264,7 @@ test('removeDevice forgets a discovered device', { skip: isCI, timeout: 30000 },
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()

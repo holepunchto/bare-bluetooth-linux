@@ -1,6 +1,6 @@
 const { test, hook } = require('brittle')
 const { Adapter, Characteristic } = require('..')
-const { isCI } = require('./helpers')
+const { isCI, onAnyDevice } = require('./helpers')
 
 let adapter
 let device
@@ -28,7 +28,7 @@ hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()

@@ -34,9 +34,11 @@ async function openPair(t, { accept = true, serverSecurity, clientSecurity } = {
       const ondevice = (d) => {
         if (d.address !== server.address) return
         client.off('device', ondevice)
+        client.off('deviceCached', ondevice)
         resolve(d)
       }
       client.on('device', ondevice)
+      client.on('deviceCached', ondevice)
     })
   }
   await client.stopDiscovery()

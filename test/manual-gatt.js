@@ -218,6 +218,7 @@ async function main() {
   for (const device of adapter.devices.values()) watch(device)
 
   adapter.on('device', watch)
+  adapter.on('deviceCached', watch)
 }
 
 Bare.on('exit', report)

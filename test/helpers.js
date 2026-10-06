@@ -9,6 +9,13 @@ exports.vhci =
     ? { a: os.getEnv('BT_VHCI_A'), b: os.getEnv('BT_VHCI_B') }
     : null
 
+// For tests that only need some device, whether bluetoothd already held it or
+// just heard it
+exports.onAnyDevice = function onAnyDevice(adapter, fn) {
+  adapter.on('device', fn)
+  adapter.on('deviceCached', fn)
+}
+
 exports.poweredAdapter = function poweredAdapter() {
   const adapter = new Adapter()
   let powered = false

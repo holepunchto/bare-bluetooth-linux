@@ -1,12 +1,12 @@
 const test = require('brittle')
 const { Adapter, Service } = require('..')
-const { isCI } = require('./helpers')
+const { isCI, onAnyDevice } = require('./helpers')
 
 test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
   const found = new Promise((resolve) => {
-    adapter.on('device', resolve)
+    onAnyDevice(adapter, resolve)
   })
 
   await adapter.startDiscovery()
