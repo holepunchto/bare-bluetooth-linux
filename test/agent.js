@@ -178,23 +178,23 @@ test('Agent is exported', (t) => {
   t.is(Agent.name, 'Agent')
 })
 
-test('Agent refuses everything it was not taught', (t) => {
+test('Agent refuses everything it was not taught', async (t) => {
   const bare = new Agent()
 
-  t.exception(() => bare.requestPinCode('/org/bluez/hci0/dev_00'), /not implemented/)
-  t.exception(() => bare.requestPasskey('/org/bluez/hci0/dev_00'), /not implemented/)
-  t.exception(() => bare.requestConfirmation('/org/bluez/hci0/dev_00', 0), /not implemented/)
-  t.exception(() => bare.requestAuthorization('/org/bluez/hci0/dev_00'), /not implemented/)
-  t.exception(() => bare.authorizeService('/org/bluez/hci0/dev_00', '180a'), /not implemented/)
-  t.exception(() => bare.displayPinCode('/org/bluez/hci0/dev_00', '000000'), /not implemented/)
+  await t.exception(bare.requestPinCode('/org/bluez/hci0/dev_00'), /not implemented/)
+  await t.exception(bare.requestPasskey('/org/bluez/hci0/dev_00'), /not implemented/)
+  await t.exception(bare.requestConfirmation('/org/bluez/hci0/dev_00', 0), /not implemented/)
+  await t.exception(bare.requestAuthorization('/org/bluez/hci0/dev_00'), /not implemented/)
+  await t.exception(bare.authorizeService('/org/bluez/hci0/dev_00', '180a'), /not implemented/)
+  await t.exception(bare.displayPinCode('/org/bluez/hci0/dev_00', '000000'), /not implemented/)
 })
 
-test('Agent ignores what needs no answer', (t) => {
+test('Agent ignores what needs no answer', async (t) => {
   const bare = new Agent()
 
-  t.execution(() => bare.displayPasskey('/org/bluez/hci0/dev_00', 0, 0))
-  t.execution(() => bare.release())
-  t.execution(() => bare.cancel())
+  await t.execution(bare.displayPasskey('/org/bluez/hci0/dev_00', 0, 0))
+  await t.execution(bare.release())
+  await t.execution(bare.cancel())
 })
 
 test('a canceling subclass propagates the code', async (t) => {
