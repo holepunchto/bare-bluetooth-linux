@@ -1,6 +1,96 @@
 # bare-bluetooth-linux
 
-Linux bluetooth bindings for Bare
+BlueZ bindings for Bare. Provides central and peripheral roles, GATT services and characteristics, and L2CAP channels on Linux.
+
+```
+npm i bare-bluetooth-linux
+```
+
+## Usage
+
+Central, scanning for a Heart Rate monitor and reading its measurement:
+
+```js
+const { Adapter } = require('bare-bluetooth-linux')
+
+const adapter = new Adapter()
+
+adapter.on('device', async (device) => {
+  if (!device.uuids.includes('0000180d-0000-1000-8000-00805f9b34fb')) return
+
+  await adapter.stopDiscovery()
+  await device.connect()
+
+  device.on('servicesResolved', (resolved) => {
+    if (!resolved) return
+
+    for (const service of device.services.values()) {
+      for (const characteristic of service.characteristics.values()) {
+        if (characteristic.flags.includes('notify')) {
+          characteristic.on('data', (value) => console.log(new Uint8Array(value)))
+          characteristic.startNotify()
+        }
+      }
+    }
+  })
+})
+
+adapter.setDiscoveryFilter({ transport: 'le' }).then(() => adapter.startDiscovery())
+```
+
+Peripheral, publishing a Heart Rate service and notifying a new value every second:
+
+```js
+const {
+  Adapter,
+  Advertisement,
+  Agent,
+  GattApplication,
+  GattService,
+  GattCharacteristic
+} = require('bare-bluetooth-linux')
+
+const SERVICE = '0000180d-0000-1000-8000-00805f9b34fb'
+
+const characteristic = new GattCharacteristic({
+  uuid: '00002a37-0000-1000-8000-00805f9b34fb',
+  flags: ['read', 'notify'],
+  value: new Uint8Array([0, 60])
+})
+
+const service = new GattService({ uuid: SERVICE })
+service.addCharacteristic(characteristic)
+
+const app = new GattApplication({ path: '/com/example/heart' })
+app.addService(service)
+
+class AcceptAll extends Agent {
+  requestAuthorization() {
+    return Promise.resolve(true)
+  }
+}
+
+const adapter = new Adapter()
+
+async function main() {
+  await adapter.registerAgent(new AcceptAll())
+  await adapter.requestDefaultAgent()
+  await adapter.registerApplication(app)
+  await adapter.registerAdvertisement(
+    new Advertisement({ localName: 'bare', serviceUUIDs: [SERVICE] })
+  )
+
+  setInterval(() => {
+    characteristic.value = new Uint8Array([0, 60 + Math.round(Math.random() * 10)])
+  }, 1000)
+}
+
+main()
+```
+
+## API
+
+See [`index.d.ts`](./index.d.ts) and the declarations next to each module in [`lib/`](./lib).
 
 ## Testing
 
@@ -42,3 +132,7 @@ all 7 checks observed, the gatt server works end to end
 You need a BLE explorer on the phone: nRF Connect or LightBlue, both free.
 
 Clear the bond on **both** sides before a run. A bond forgotten on one side only leaves the other holding keys the peer no longer has, and every later pairing fails with no useful error. Use the script to remove the bond on Linux side. Do it manually on the phone side. Phones also cache the GATT service list per peripheral and never re-read it, so a stale bond will have you staring at a service tree from a previous session, wondering why your changes do nothing.
+
+## License
+
+Apache-2.0
