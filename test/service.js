@@ -1,19 +1,11 @@
 const test = require('brittle')
 const { Adapter, Service } = require('..')
-const { isCI, onAnyDevice } = require('./helpers')
+const { isCI, findDevice } = require('./helpers')
 
 test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
@@ -46,3 +38,38 @@ test('device services after connect', { skip: isCI, timeout: 60000 }, async (t) 
 
   await device.disconnect()
 })
+
+test(
+  'services of a device connected before attaching are serviceCached',
+  { skip: isCI, timeout: 60000 },
+  async (t) => {
+    using adapter = new Adapter()
+
+    const device = await findDevice(adapter)
+
+    try {
+      await device.connect()
+    } catch (err) {
+      t.pass('connect failed (device may not support it)')
+      return
+    }
+
+    if (!device.servicesResolved) {
+      await new Promise((resolve) => device.once('servicesResolved', resolve))
+    }
+
+    // Attaching while the link is up: bluetoothd replays device and services
+    using late = new Adapter()
+
+    const cached = await new Promise((resolve) => {
+      late.on('deviceCached', (d) => {
+        if (d.address === device.address) d.on('serviceCached', resolve)
+      })
+    })
+
+    t.ok(cached instanceof Service)
+    t.ok(device.services.has(cached.path), cached.uuid)
+
+    await device.disconnect()
+  }
+)

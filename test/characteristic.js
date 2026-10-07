@@ -1,6 +1,6 @@
 const { test, hook } = require('brittle')
 const { Adapter, Characteristic } = require('..')
-const { isCI, onAnyDevice } = require('./helpers')
+const { isCI, findDevice } = require('./helpers')
 
 let adapter
 let device
@@ -27,15 +27,7 @@ function needsWritableCharacteristic(t) {
 hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  device = await found
-
-  await adapter.stopDiscovery()
+  device = await findDevice(adapter)
 
   try {
     await device.connect()
@@ -155,6 +147,29 @@ test('stopNotify disables notifications', { skip: isCI }, async (t) => {
   await notifiableCharacteristic.stopNotify()
   t.pass()
 })
+
+test(
+  'characteristics of a device connected before attaching are characteristicCached',
+  { skip: isCI, timeout: 30000 },
+  async (t) => {
+    if (!service) return t.pass('no service available')
+
+    // Attaching while the link is up: bluetoothd replays the whole GATT tree
+    using late = new Adapter()
+
+    const cached = await new Promise((resolve) => {
+      late.on('deviceCached', (d) => {
+        if (d.address !== device.address) return
+        d.on('serviceCached', (s) => {
+          if (s.path === service.path) s.on('characteristicCached', resolve)
+        })
+      })
+    })
+
+    t.ok(cached instanceof Characteristic)
+    t.ok(service.characteristics.has(cached.path), cached.uuid)
+  }
+)
 
 hook('teardown', { skip: isCI }, async (t) => {
   if (device) await device.disconnect()

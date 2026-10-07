@@ -1,7 +1,7 @@
 const test = require('brittle')
 const { Adapter, Device, L2CAPChannel, constants } = require('..')
 const binding = require('../binding')
-const { isCI, onAnyDevice } = require('./helpers')
+const { isCI, findDevice } = require('./helpers')
 
 test('L2CAPChannel is exported', (t) => {
   t.is(typeof L2CAPChannel, 'function')
@@ -171,15 +171,7 @@ test('publishL2CAPChannel assigns a psm', { skip: isCI }, async (t) => {
 test('openL2CAPChannel emits channelOpen', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 

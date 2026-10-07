@@ -1,6 +1,6 @@
 const { test, hook } = require('brittle')
 const { Adapter, Device } = require('..')
-const { isCI, onAnyDevice } = require('./helpers')
+const { isCI, findDevice, onAnyDevice } = require('./helpers')
 
 test('Device is exported', (t) => {
   t.is(typeof Device, 'function')
@@ -10,15 +10,7 @@ test('Device is exported', (t) => {
 test('device has expected properties', { skip: isCI, timeout: 10000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
 
   t.ok(typeof device.address === 'string')
   t.ok(device.address.length > 0)
@@ -84,15 +76,7 @@ test('device emits rssi', { skip: isCI, timeout: 20000 }, async (t) => {
 test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
 
@@ -118,15 +102,7 @@ test('device connect', { skip: isCI, timeout: 60000 }, async (t) => {
 test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
 
   t.comment('device: ' + device.address + ' (' + (device.name || 'unnamed') + ')')
   t.comment('paired before: ' + device.paired)
@@ -144,15 +120,7 @@ test('device pair', { skip: isCI, timeout: 60000 }, async (t) => {
 test('device properties after adapter destroy', { skip: isCI, timeout: 10000 }, async (t) => {
   const adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  const device = await found
-
-  await adapter.stopDiscovery()
+  const device = await findDevice(adapter)
   adapter.destroy()
 
   t.is(device.name, undefined)
@@ -214,15 +182,7 @@ function needsDevice(t) {
 hook('setup', { skip: isCI, timeout: 60000 }, async (t) => {
   eventAdapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(eventAdapter, resolve)
-  })
-
-  await eventAdapter.startDiscovery()
-
-  eventDevice = await found
-
-  await eventAdapter.stopDiscovery()
+  eventDevice = await findDevice(eventAdapter)
 })
 
 test('connected event on connect', { skip: isCI, timeout: 60000 }, async (t) => {
@@ -263,15 +223,7 @@ hook('teardown', { skip: isCI }, async (t) => {
 test('removeDevice forgets a discovered device', { skip: isCI, timeout: 30000 }, async (t) => {
   using adapter = new Adapter()
 
-  const found = new Promise((resolve) => {
-    onAnyDevice(adapter, resolve)
-  })
-
-  await adapter.startDiscovery()
-
-  await found
-
-  await adapter.stopDiscovery()
+  await findDevice(adapter)
 
   // Never touch a bonded or live device: removing one would unpair real
   // hardware such as the keyboard this machine runs on
